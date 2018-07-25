@@ -395,192 +395,8 @@ dataProcess  <-  function(raw,
 	                            " transformation is done - okay")))
 	write.table(processout, file=finalfile, row.names=FALSE)
    
-	## Check multi-method or not : multiple run for a replicate
 	work$RUN <- factor(work$RUN)
-	
-	checkMultirun <- .countMultiRun(work)
-	
-	if ( checkMultirun$is.risky ){
-	    ## if can't matching fractionation, make warning and stop it.
-	    stop('** MSstats suspects that there are fractionations and potentially technical replicates too. Please add Fraction column in the input.')
-	    
-	} else if ( checkMultirun$out ) {
-	    if ( any(is.element(colnames(work), 'FRACTION')) ){
-	        
-	        processout <- rbind(processout, 
-	                            c(paste("Multiple fractionations are existed : ", 
-	                                    length(unique(work$FRACTION)), 
-	                                    "fractionations per MS replicate.")))
-	        write.table(processout, file=finalfile, row.names=FALSE)
-	        
-	    } else {
-	        ## need to make new column 'Fraction'
-	        ## each sample has no technical replicate, all runs are fractionated MS runs.
-	        work$FRACTION <- NA
-	        
-	        info <- unique(work[, c('GROUP_ORIGINAL', 'SUBJECT_ORIGINAL', 'RUN')])
-	        info$condition <- paste(info$GROUP_ORIGINAL, info$SUBJECT_ORIGINAL, sep="_")
-	        
-	        tmp <- work[!is.na(work$ABUNDANCE), ]
-	        
-	        ## get on one sample first
-	        info.sample1 <- info[info$condition == unique(info$condition)[1], ]
-	        
-	        ## assign fraction info first
-	        info.sample1$FRACTION <- seq(1, nrow(info.sample1))
-	        
-	        for(k in 1:length(unique(info.sample1$RUN))){
-	            
-	            ## then fine the same fraction for next sample
-	            unique.feature <- unique( tmp[tmp$RUN %in% info.sample1$RUN[k], 'FEATURE'] )
-	            
-	            tmptmp <- tmp[which(tmp$FEATURE %in% unique.feature), ]
-	            tmptmp$condition <- paste(tmptmp$GROUP_ORIGINAL, tmptmp$SUBJECT_ORIGINAL, sep="_")
-	            
-	            count.feature <- reshape2::dcast(RUN ~ GROUP_ORIGINAL + SUBJECT_ORIGINAL, 
-	                                             data=tmptmp, fun.aggregate=length, value.var='ABUNDANCE')
-                
-	            ## !! get one run which has maximum overlapped feature by each sample
-	            same.frac <- apply(count.feature[,-which(colnames(count.feature) %in% c('RUN'))], 2, 
-	                               function(x) count.feature[which.max(x), 'RUN'])
-	            
-	            work[ which(work$RUN %in% same.frac), 'FRACTION'] <- info.sample1[ which(info.sample1$RUN %in% info.sample1$RUN[k]), 'FRACTION']
-	        }
-	        
-	        rm(tmp)
-	        
-	        ## final check up
-	        checkup <- sum( is.na(unique(work$FRACTION)) ) > 0
-	        
-	        if ( !checkup ){
-	            processout <- rbind(processout, c(paste("Multiple fractions are existed : ", 
-	                                                    length(unique(work$FRACTION)), "fractions per MS replicate.")))
-	            write.table(processout, file=finalfile, row.names=FALSE)
-	        } else {
-	            
-	            processout <- rbind(processout, c('** It is hard to find the same fractionation across sample, due to lots of overlapped features between fractionations.
-	                 Please add Fraction column in input.'))
-	            write.table(processout, file=finalfile, row.names=FALSE)
-	            
-	            stop("** It is hard to find the same fractionation across sample, due to lots of overlapped features between fractionations.
-	                 Please add Fraction column in input.")
-	        }
-
-	    }
-	    
-	    ################################################
-	    ## need additional step that remove overlapped features across several fraction
-	    ################################################
-
-	    if ( length(unique(work$FRACTION)) > 1 ){
-	        
-	        ## extra info for feature and fraction
-	        work$tmp <- paste(work$FEATURE, work$FRACTION, sep="_")
-	        
-	        tmp <- work[!is.na(work$ABUNDANCE) & work$ABUNDANCE > 0, ]
-	        count.feature <- reshape2::dcast(FEATURE ~ FRACTION, 
-	                                         data=tmp, 
-	                                         fun.aggregate=length, 
-	                                         value.var='ABUNDANCE')
-	        rm(tmp)
-	        
-	        ## 1. first, keep features which are measured in one fraction
-	        count.fraction <- apply(count.feature[, -which(colnames(count.feature) %in% c('FEATURE'))], 
-	                                1, 
-	                                function(x) sum(x>0))
-	        # keep.feature <- count.feature[count.fraction == 1, 'FEATURE']
-	    
-	        ## 2. second, if features are measured in multiple fractionations, 
-	        ## use the fractionation with maximum number of measurements.
-	        ## if there are multiple maximum number of measurements, remove features completely.
-	        ## count.feature1 : features that are measured in multiple fractions
-	        count.feature1 <- count.feature[count.fraction > 1, ]
-	    
-	        if( nrow(count.feature1) > 0 ){
-
-	            ## how many fractions have maximum number of measurements?
-	            count.fraction <- apply(count.feature1[, -which(colnames(count.feature1) %in% c('FEATURE'))], 
-	                                    1, 
-	                                    function(x) sum(x == max(x)))
-	            
-	            ## 2.1 count.fraction == 1 means that there is one fraction that have one maximum # measurements.
-	            ## count.feature2 : features that measured in multiple fractions.
-	            ## however, it has one fraction with max number of measurements across fractions.
-	            count.feature2 <- count.feature1[count.fraction == 1, ] 
-	            count.feature2$FEATURE <- as.character(count.feature2$FEATURE)
-	            
-	            if( nrow(count.feature2) > 0 ){
-	                
-	                #remove.fraction <- apply(count.feature2, 1, 
-	                #                         function(x) paste(x[1], names(x[-1])[x[-1] != max(x[-1]) & x[-1] != 0], sep="_") )
-	                #remove.fraction <- unlist(remove.fraction)
-	                
-	                remove.fraction <- gather(count.feature2, 'Fraction', 'ncount', 2:ncol(count.feature2))
-	                remove.fraction <- remove.fraction %>% group_by(FEATURE) %>% filter(ncount != max(ncount))
-	                remove.fraction <- remove.fraction %>% filter(ncount != 0)
-	                remove.fraction$tmp <- paste(remove.fraction$FEATURE, remove.fraction$Fraction, sep="_")
-
-	                work[work$tmp %in% remove.fraction$tmp, 'INTENSITY'] <- NA
-	                work[work$tmp %in% remove.fraction$tmp, 'ABUNDANCE'] <- NA
-	            }
-	            
-	            rm(count.feature2)
-	            rm(remove.fraction)
-	            
-	            ## 2.2 count.fraction > 1 means that there are multiple fractions have the same # measurements.
-	            ## Then check whether there are multiple maximum number of measurements across fractionation
-	            count.feature3 <- count.feature1[count.fraction > 1, ]
-	            
-	            if( nrow(count.feature3) > 0 ){
-	                
-	                ## 2.2.1 : maximum number of measurement / fraction == 1, remove that feature
-	                max.feature <- apply(count.feature3[, -which(colnames(count.feature3) %in% c('FEATURE'))], 
-	                                     1, 
-	                                     function(x) max(x))
-	                max.feature.1 <- count.feature3[max.feature == 1, 'FEATURE'] 
-	                
-	                work <- work[-which(work$FEATURE %in% max.feature.1), ]
-	                
-	                count.feature3 <- count.feature3[-which(count.feature3$FEATURE %in% max.feature.1), ]
-	                
-	                if ( nrow(count.feature3) > 0 ) {
-	                    
-	                    ###############
-	                    ## 2.2.2 : remove fractionations which have not maximum number of measurements
-	                    remove.fraction <- gather(count.feature3, 'Fraction', 'ncount', 2:ncol(count.feature3))
-	                    remove.fraction <- remove.fraction %>% group_by(FEATURE) %>% filter(ncount != max(ncount))
-	                    remove.fraction <- remove.fraction %>% filter(ncount != 0)
-	                    remove.fraction$tmp <- paste(remove.fraction$FEATURE, remove.fraction$Fraction, sep="_")
-	                    
-	                    work[work$tmp %in% remove.fraction$tmp, 'INTENSITY'] <- NA
-	                    work[work$tmp %in% remove.fraction$tmp, 'ABUNDANCE'] <- NA
-	                    
-	                    rm(remove.fraction)
-	                    
-	                    ###############
-	                    ## 2.2.3 : among fractionations, keep one fractionation which has maximum average
-	                    tmptmp <- work[which(work$FEATURE %in% count.feature3$FEATURE), ]
-	                    tmptmp <- tmptmp[!is.na(tmptmp$ABUNDANCE), ]
-	                    
-	                    mean.frac.feature <- tmptmp %>% group_by(FEATURE, tmp) %>% summarise(mean=mean(ABUNDANCE))
-	                    remove.fraction <- mean.frac.feature %>% group_by(FEATURE) %>% filter(mean != max(mean))
-	                    
-	                    work[work$tmp %in% remove.fraction$tmp, 'INTENSITY'] <- NA
-	                    work[work$tmp %in% remove.fraction$tmp, 'ABUNDANCE'] <- NA
-	                    
-	                    rm(remove.fraction)
-	                    
-	                    rm(tmptmp)
-	                }
-	            }
-	        }
-	        
-	        work <- work[, -which(colnames(work) %in% c('tmp'))]
-	    }
-	    
-	} else {  ## no fractionation
-	    work$FRACTION <- 1
-	}
+    work$FRACTION <- 1
 
 	## check messingness for multirun 
   
@@ -594,1042 +410,604 @@ dataProcess  <-  function(raw,
 	## here and for the case with multuple methods]
 	## only 1 method
   
-	if ( !checkMultirun$out | length(unique(work$FRACTION)) == 1 ) {
-    
-		## label-free experiments
-    	if (nlevels(work$LABEL) == 1) {
-      
-      		## get feature by Run count of data
-      		structure = tapply ( work$ABUNDANCE, list ( work$FEATURE, work$RUN ) , function ( x ) length ( x ) ) 
-      
-      		## structure value should be 1 for label-free, if not there are missingness. if more there are duplicates.
-      
-      		flagmissing = sum(is.na(structure)) > 0
-      		flagduplicate = sum(structure[!is.na(structure)]>1) > 0
-      
-      		### if there is missing rows
-      		if ( flagmissing ) {
-        		processout <- rbind(processout, c("CAUTION: the input dataset has incomplete rows. 
-        		                                  If missing peaks occur they should be included in the dataset as separate rows, 
-        		                                  and the missing intensity values should be indicated with 'NA'. 
-        		                                  The incomplete rows are listed below."))
-        		write.table(processout, file=finalfile,row.names=FALSE)
-        
-        		message("CAUTION : the input dataset has incomplete rows. 
-        		        If missing peaks occur they should be included in the dataset as separate rows, 
-        		        and the missing intensity values should be indicated with 'NA'. 
-        		        The incomplete rows are listed below.")
-        
-        		## first, which run has missing	
-        		runstructure <- apply ( structure, 2, function ( x ) sum ( is.na ( x ) ) ) > 0
-        
-        		## get the name of Run
-        		runID <- names(runstructure[runstructure==TRUE])
-        
-        		## for missign row, need to assign before looping
-       			missingwork <- NULL
-        
-        		## then for each run, which features are missing,
-				for(j in 1:length(runID)) {
-          
-				    ## get subject, group information for this run
-					nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL","GROUP_ORIGINAL",
-					                                                "GROUP","SUBJECT","SUBJECT_NESTED",
-					                                                "RUN","FRACTION")])
-          
-					## get feature ID
-					featureID <- structure[,colnames(structure)==runID[j]]
-          
-					## get feature ID which has no measuremnt.
-					finalfeatureID <- featureID[is.na(featureID)]
-          
-					## print features ID	 	
-					message(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
-					                  ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
-					                  " has incomplete rows for some features (", 
-					                  paste(names(finalfeatureID), collapse=", "), ")"))
-          
-					## save in process file.
-					processout <- rbind(processout, c(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
-					                                            ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
-					                                            " has incomplete rows for some features (", 
-					                                            paste(names(featureID[is.na(featureID)]), collapse=", "), ")")))
-					write.table(processout, file=finalfile, row.names=FALSE)
-          
-					## add missing rows if option is TRUE
-					if (fillIncompleteRows) {
-            
-            	        tempTogetfeature <- work[which(work$FEATURE %in% names(finalfeatureID)), ]
-            
-            			## get PROTEIN and FEATURE infomation
-            			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-            
-            			## merge feature info and run info as 'work' format
-            			tempmissingwork <- data.frame(tempfeatureID, 
-            			                              LABEL="L",
-            			                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-            			                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-            			                              RUN=nameID$RUN, 
-            			                              GROUP=nameID$GROUP, 
-            			                              SUBJECT=nameID$SUBJECT, 
-            			                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-            			                              INTENSITY=NA, 
-            			                              ABUNDANCE=NA, 
-            			                              FRACTION=nameID$FRACTION)	
-            
-            			## merge with tempary space, missingwork
-            			missingwork <- rbind(missingwork, tempmissingwork)
-          			} # end fillIncompleteRows options
-        		} # end loop for run ID
-        
-        		## [THT: this part can probably be merged into the above. 
-        		## Also, it might be better to check fillIncompleteRows earlier
-        		## and terminate the process when it's FALSE]
-        		if (fillIncompleteRows) {
-          
-          			## merge with work
-          			## in future, use rbindlist?? rbindlist(list(work, missingwork))
-          			work <- rbind(work, missingwork)
-          
-          			## print message
-          			message("\n DONE : Incomplete rows for missing peaks are added with intensity values=NA. \n")
-          
-          			## save in process file.
-          			processout <- rbind(processout, "Incomplete rows for missing peaks are added with intensity values=NA. - done, Okay")
-          			write.table(processout, file=finalfile, row.names=FALSE)
-          
-        		} else {
-          
-          			## save in process file.
-          			processout <- rbind(processout,"Please check whether features in the list are generated from spectral processing tool. 
-          			                    Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
-          			write.table(processout, file=finalfile,row.names=FALSE)
-          
-          			stop("Please check whether features in the list are generated from spectral processing tool or not. 
-          			     Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
-          
-        		}
-      		} # end for flag missing
-      		
-			## if there are duplicates measurements
-			if (flagduplicate) {
-        
-        		## first, which run has duplicates
-        		runstructure <- apply ( structure, 2, function ( x ) sum (x[!is.na(x)] > 1 ) > 0 )
-        
-        		runID <- names(runstructure[runstructure==TRUE])
-        
-        		## then for each run, which features have duplicates,
-        		for(j in 1:length(runID)) {
-          
-          			nameID <- unique(work[work$RUN == runID[j], c("SUBJECT_ORIGINAL", "GROUP_ORIGINAL", 
-          			                                              "GROUP","SUBJECT", "SUBJECT_NESTED", 
-          			                                              "RUN", "FRACTION")])
-          
-          			featureID <- structure[, colnames(structure)==runID[j]]
-          			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
-          
-          			message(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
-          			              ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
-          			              " has multiple rows (duplicate rows) for some features (", 
-          			              paste(names(finalfeatureID), collapse=", "), ")"))
-          
-          			## save in process file.
-          			processout <- rbind(processout, c(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]), 
-          			                                        ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
-          			                                        " has multiple rows (duplicate rows) for some features (", 
-          			                                        paste(names(featureID[is.na(featureID)]), collapse=", "), ")")))
-          			write.table(processout, file=finalfile, row.names=FALSE)
-        		}
-        
-        		## save in process file.
-        		processout <- rbind(processout,"Please remove duplicate rows in the list above. ")
-        		write.table(processout, file=finalfile,row.names=FALSE)
-        
-        		stop("Please remove duplicate rows in the list above.\n")		
-			} # end flag duplicate
-      
-		    	## no missing and no duplicates
-      		if (!flagmissing & !flagduplicate) {
-        		processout <- rbind(processout, c("Balanced data format with NA for missing feature intensities - okay"))
-        		write.table(processout, file=finalfile, row.names=FALSE)
-      		} 
-      
-      		## end label-free
-    	} else { 
-      
-			## label-based experiment
-      
-      		## count the reference and endobenous separately
-      		work.l <- work[work$LABEL == "L", ]
-      		work.h <- work[work$LABEL == "H", ]
-       
-      		## get feature by Run count of data
-      		structure.l <- tapply(work.l$ABUNDANCE, list(work.l$FEATURE, work.l$RUN), function (x) length (x) ) 
-      		structure.h <- tapply(work.h$ABUNDANCE, list(work.h$FEATURE, work.h$RUN), function (x) length (x) ) 
-           
-			## first, check some features which completely missing across run
-      		missingcomplete.l <- NULL	
-      		missingcomplete.h <- NULL	
-      
-      		## 1. reference peptides
-      		featurestructure.h <- apply(structure.h, 1, function (x) sum(is.na(x)))
-      
-      		## get feature ID of reference which are completely missing across run
-      		featureID.h <- names(featurestructure.h[featurestructure.h == ncol(structure.h)])
-      
-      		if (length(featureID.h) > 0) {
-        		## print message
-        		message(paste0("CAUTION : some REFERENCE features have missing intensities in all the runs. 
-        		              The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "), 
-        		              ". Please check whether features in the list are correctly generated from spectral processing tool. \n"))
-        
-				## save in process file.
-				processout <- rbind(processout,c(paste("CAUTION : some REFERENCE features have missing intensities in all the runs. 
-				                                       The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "), 
-				                                       ". Please check whether features in the list are correctly generated from spectral processing tool.", sep="")))
-				write.table(processout, file=finalfile, row.names=FALSE)
-        
-        		## add missing rows if option is TRUE
-        		if (fillIncompleteRows) {
-          
-          			## get unique Run information
-          			nameID <- unique(work.h[, c("SUBJECT_ORIGINAL", "GROUP_ORIGINAL", "GROUP", "SUBJECT", "SUBJECT_NESTED", "RUN", "FRACTION")])
-          
-          			## get PROTEIN and FEATURE information
-           			## here use whole work dataset
-          			tempTogetfeature <- work[which(work$FEATURE %in% featureID.h), ]
-          			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-          
-          			## then generate data.frame for missingness,
-          			#for(j in 1:nrow(nameID)) {
-            
-           			#	## merge feature info and run info as 'work' format
-            		#	tempmissingwork <- data.frame(tempfeatureID, LABEL="H",GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], RUN=nameID$RUN[j], GROUP=nameID$GROUP[j], SUBJECT=nameID$SUBJECT[j], SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], INTENSITY=NA, ABUNDANCE=NA, METHOD=nameID$METHOD[j])	
-            
-            		#	## merge with tempary space, missingwork
-            		#	missingcomplete.h <- rbind(missingcomplete.h, tempmissingwork)
-          			#}
-                
-          			# MC : 2016.04.21 : use merge for simplicity
-          			tmp <- merge(nameID, tempfeatureID, by=NULL)
-          			missingcomplete.h <- data.frame(PROTEIN=tmp$PROTEIN, 
-          			                                PEPTIDE=tmp$PEPTIDE, 
-          			                                TRANSITION=tmp$TRANSITION, 
-          			                                FEATURE=tmp$FEATURE, 
-          			                                LABEL="H", 
-          			                                GROUP_ORIGINAL=tmp$GROUP_ORIGINAL, 
-          			                                SUBJECT_ORIGINAL=tmp$SUBJECT_ORIGINAL, 
-          			                                RUN=tmp$RUN, 
-          			                                GROUP=tmp$GROUP, 
-          			                                SUBJECT=tmp$SUBJECT, 
-          			                                SUBJECT_NESTED=tmp$SUBJECT_NESTED, 
-          			                                INTENSITY=NA, 
-          			                                ABUNDANCE=NA, 
-          			                                FRACTION=tmp$FRACTION)
-          			rm(tmp)
-                
-        		}	# end fillIncompleteRows option     
-      		} # end for reference peptides
-      
-      		## 2. endogenous peptides
-      		featurestructure.l <- apply(structure.l, 1, function (x) sum(is.na(x)))
-      
-      		## get feature ID of reference which are completely missing across run
-      		featureID.l <- names(featurestructure.l[featurestructure.l == ncol(structure.l)])
-      
-      		if (length(featureID.l) > 0) {
-        		## print message
-        		message(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. 
-        		              The completely missing ENDOGENOUS features are ", paste(featureID.l, collapse=", "), 
-        		              ". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep=""))
-        
-        		## save in process file.
-        		processout <- rbind(processout,c(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. 
-        		                                       The completely missing ENDOGENOUS features are ", 
-        		                                       paste(featureID.l, collapse=", "),
-        		                                       ". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep="")))
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-        		## add missing rows if option is TRUE
-        		if (fillIncompleteRows) {
-          
-          			## get unique Run information
-          			nameID <- unique(work.l[, c("SUBJECT_ORIGINAL", 
-          			                            "GROUP_ORIGINAL", 
-          			                            "GROUP", 
-          			                            "SUBJECT", 
-          			                            "SUBJECT_NESTED", 
-          			                            "RUN", 
-          			                            "FRACTION")])
-          
-          			## get PROTEIN and FEATURE information
-          			## here use whole work dataset
-          			tempTogetfeature <- work[which(work$FEATURE %in% featureID.l), ]
-          			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-          
-          			## then generate data.frame for missingness,
-          			#for (j in 1:nrow(nameID)) {
-            
-            		#	## merge feature info and run info as 'work' format
-            		#	tempmissingwork <- data.frame(tempfeatureID, LABEL="L",GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], RUN=nameID$RUN[j], GROUP=nameID$GROUP[j], SUBJECT=nameID$SUBJECT[j], SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], INTENSITY=NA, ABUNDANCE=NA, METHOD=nameID$METHOD[j])	
-            
-            		#	## merge with tempary space, missingwork
-            		#	missingcomplete.l <- rbind(missingcomplete.l, tempmissingwork)
-          			#}
-                
-                    # MC : 2016.04.21 : use merge for simplicity
-                    tmp <- merge(nameID, tempfeatureID, by=NULL)
-          			missingcomplete.l <- data.frame(PROTEIN=tmp$PROTEIN, 
-          			                                PEPTIDE=tmp$PEPTIDE, 
-          			                                TRANSITION=tmp$TRANSITION, 
-          			                                FEATURE=tmp$FEATURE, 
-          			                                LABEL="L", 
-          			                                GROUP_ORIGINAL=tmp$GROUP_ORIGINAL, 
-          			                                SUBJECT_ORIGINAL=tmp$SUBJECT_ORIGINAL, 
-          			                                RUN=tmp$RUN, 
-          			                                GROUP=tmp$GROUP, 
-          			                                SUBJECT=tmp$SUBJECT, 
-          			                                SUBJECT_NESTED=tmp$SUBJECT_NESTED, 
-          			                                INTENSITY=NA, 
-          			                                ABUNDANCE=NA, 
-          			                                FRACTION=tmp$FRACTION)
-        		    rm(tmp)
-                } # end fillIncompleteRows option
-      		} # end endogenous peptides
-          
-			## second, check other some missingness
-      
-      		## for missign row, need to assign before looping. need to assign at the beginning because it need either cases, with missingness or not
-      		missingwork.l <- NULL
-      		missingwork.h <- NULL
-      
-     		## structure value should be 1 for reference and endogenous separately, if not there are missingness. if more there are duplicates.
-      
-      		## if count of NA is not zero and not number of run (excluding complete missingness across runs)
-      
-      		missing.l <- names(featurestructure.l[featurestructure.l != ncol(structure.l) & featurestructure.l != 0])
-      		missing.h <- names(featurestructure.h[featurestructure.h != ncol(structure.h) & featurestructure.h != 0])
-      
-			flagmissing.l = length(missing.l) > 0
-			flagmissing.h = length(missing.h) > 0
-      
-			## structure value is greater than 1, there are duplicates
-			flagduplicate.l = sum(structure.l[!is.na(structure.l)] > 1) > 0
-			flagduplicate.h = sum(structure.h[!is.na(structure.h)] > 1) > 0
-      
-      		## if there is missing rows for endogenous
-      		if ( flagmissing.l | flagmissing.h ) {
-        		processout <- rbind(processout,c("CAUTION: the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below."))
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-       			message("CAUTION : the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below.")
-        
-        		## endogenous intensities
-        		if (flagmissing.l) {
-          
-                    if (length(missing.l) > 1){
-          			    runstructure <- apply ( structure.l[which(rownames(structure.l) %in% missing.l), ], 2, function ( x ) sum ( is.na ( x ) ) ) > 0
-          			} else if (length(missing.l) == 1) {
-          			    runstructure <- is.na ( structure.l[which(rownames(structure.l) %in% missing.l), ]) > 0
-          			}
-          			
-          			## get the name of Run
-          			runID <- names(runstructure[runstructure==TRUE])
-          
-          			## then for each run, which features are missing,
-          			for(j in 1:length(runID)) {
-            
-            			## get subject, group information for this run
-            			nameID <- unique(work.l[work.l$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-            			                                                "GROUP_ORIGINAL", 
-            			                                                "GROUP", 
-            			                                                "SUBJECT", 
-            			                                                "SUBJECT_NESTED", 
-            			                                                "RUN", 
-            			                                                "FRACTION")])
-            
-            			# MC : 2016/04/21. if there is one row, can't catch up data.frame
-            			## get feature ID
-            			if (length(missing.l) > 1){
-            			    featureID <- structure.l[which(rownames(structure.l) %in% missing.l), colnames(structure.l) == runID[j]]
-            			  
-            			    ## get feature ID which has no measuremnt.
-            			    finalfeatureID <- names(featureID[is.na(featureID)])
-            			  
-            			    ## print features ID	 	
-            			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(finalfeatureID, collapse=", "),")", sep="" ))
-            			  
-            			    ## save in process file.
-            			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(finalfeatureID, collapse=", "),")", sep="" )))
-            			    write.table(processout, file=finalfile,row.names=FALSE)
-            			  
-            			} else if (length(missing.l) == 1) {
-            			  
-            			    finalfeatureID <- missing.l
-                    
-            			    ## print features ID   	
-            			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", finalfeatureID,")", sep="" ))
-            			  
-            			    ## save in process file.
-            			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", finalfeatureID,")", sep="" )))
-            			    write.table(processout, file=finalfile,row.names=FALSE)
-            			  
-            			}	
-            
-            			## add missing rows if option is TRUE
-            			if (fillIncompleteRows) {
-              
-              				tempTogetfeature <- work.l[which(work.l$FEATURE %in% finalfeatureID), ]
-              
-              				## get PROTEIN and FEATURE infomation
-              				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-              
-              				## merge feature info and run info as 'work' format
-              				tempmissingwork <- data.frame(tempfeatureID, 
-              				                              LABEL="L",
-              				                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-              				                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-              				                              RUN=nameID$RUN, 
-              				                              GROUP=nameID$GROUP, 
-              				                              SUBJECT=nameID$SUBJECT, 
-              				                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-              				                              INTENSITY=NA, 
-              				                              ABUNDANCE=NA, 
-              				                              FRACTION=nameID$FRACTION)	
-              
-              				## merge with tempary space, missingwork
-              				missingwork.l <- rbind(missingwork.l,tempmissingwork)
-            			} # end fillIncompleteRows options
-          			} # end loop for run ID
-        		} # end for endogenous
-        
-        		## reference intensities
-        		if (flagmissing.h) {
-          
-          			## first, which run has missing	
-                    if (length(missing.h) > 1){
-          			    runstructure <- apply ( structure.h[which(rownames(structure.h) %in% missing.h), ], 2, 
-          			                        function ( x ) sum ( is.na ( x ) ) ) > 0
-                    } else if (length(missing.h) == 1) {
-                        runstructure <- is.na ( structure.h[which(rownames(structure.h) %in% missing.h), ]) > 0
-                    }
-                
-          		    ## get the name of Run
-          		    runID <- names(runstructure[runstructure==TRUE])
-          
-          			## then for each run, which features are missing,
-          			for(j in 1:length(runID)) {
-            
-            			## get subject, group information for this run
-            			nameID <- unique(work.h[work.h$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-            			                                                "GROUP_ORIGINAL", 
-            			                                                "GROUP", 
-            			                                                "SUBJECT", 
-            			                                                "SUBJECT_NESTED", 
-            			                                                "RUN", 
-            			                                                "FRACTION")])
-            
-            			# MC : 2016/04/21. if there is one row, can't catch up data.frame
-            			## get feature ID
-            			if (length(missing.h) > 1){
-                            featureID <- structure.h[which(rownames(structure.h) %in% missing.h), colnames(structure.h) == runID[j] ]
-                    
-                            ## get feature ID which has no measuremnt.
-                            finalfeatureID <- names(featureID[is.na(featureID)])
-                    
-                            ## print features ID	 	
-                            message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(finalfeatureID, collapse=", "),")", sep="" ))
-                    
-                            ## save in process file.
-                            processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(finalfeatureID, collapse=", "),")", sep="" )))
-                            write.table(processout, file=finalfile,row.names=FALSE)
-                    
-            			} else if (length(missing.h) == 1) {
-            			 
-            			    finalfeatureID <- missing.h
-                    
-            			    ## print features ID   	
-            			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", finalfeatureID,")", sep="" ))
-            			  
-            			    ## save in process file.
-            			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", finalfeatureID,")", sep="" )))
-            			    write.table(processout, file=finalfile,row.names=FALSE)
-                    
-            			}
-            			           			                         	            
-            			## add missing rows if option is TRUE
-            			if (fillIncompleteRows) {
-              
-              				tempTogetfeature <- work.h[which(work.h$FEATURE %in% finalfeatureID), ]
-              
-              				## get PROTEIN and FEATURE infomation
-              				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-              
-              				## merge feature info and run info as 'work' format
-              				tempmissingwork <- data.frame(tempfeatureID, 
-              				                              LABEL="H",
-              				                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-              				                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-              				                              RUN=nameID$RUN, 
-              				                              GROUP=nameID$GROUP, 
-              				                              SUBJECT=nameID$SUBJECT, 
-              				                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-              				                              INTENSITY=NA, 
-              				                              ABUNDANCE=NA, 
-              				                              FRACTION=nameID$FRACTION)	
-              
-              				## merge with tempary space, missingwork
-              				missingwork.h <- rbind(missingwork.h, tempmissingwork)
-                                    				
-            			} # end fillIncompleteRows options
-          			} # end loop for run ID
-        		} # end for endogenous  
-      		} # end for flag missing
-      
-      		## merge missing rows if fillIncompleteRows=TRUE or message.
-      		if (fillIncompleteRows) {
-        
-        		## merge with work
-        		## in future, use rbindlist?? rbindlist(list(work, missingwork))
-        		work <- rbind(work,missingcomplete.l, missingcomplete.h, missingwork.l, missingwork.h)
-        
-        		## print message
-        		message("\n DONE : Incomplete rows for missing peaks are added with intensity values=NA. \n")
-        
-        		## save in process file.
-        		processout <- rbind(processout, "Incomplete rows for missing peaks are added with intensity values=NA. - done, Okay")
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-      		} else if (!is.null(missingcomplete.l) | 
-      		           !is.null(missingcomplete.h) | 
-      		           !is.null(missingwork.l) | 
-      		           !is.null(missingwork.l) ) {
-        
-        		## save in process file.
-       	 		processout <- rbind(processout,
-       	 		                    "Please check whether features in the list are generated from spectral processing tool. 
-       	 		                    Or the option, fillIncompleteRows=TRUE, 
-       	 		                    will add incomplete rows for missing peaks with intensity=NA.")
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-        		stop("Please check whether features in the list are generated from spectral processing tool or not. Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
-        
-			}
-      
-			## if there are duplicates measurements
-      		if (flagduplicate.h) {
-        
-        		## first, which run has duplicates
-        		runstructure <- apply ( structure.h, 2, function ( x ) sum ( x[!is.na(x)] > 1 )>0 )
-        
-        		runID <- names(runstructure[runstructure==TRUE])
-        
-        		## then for each run, which features have duplicates,
-        		for(j in 1:length(runID)) {
-          
-          			nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-          			                                            "GROUP_ORIGINAL", 
-          			                                            "GROUP", 
-          			                                            "SUBJECT", 
-          			                                            "SUBJECT_NESTED", 
-          			                                            "RUN", 
-          			                                            "FRACTION")])
-          
-          			featureID <- structure.h[, colnames(structure.h)==runID[j]]
-          			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
-          
-          			message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some REFERENCE features (", paste(names(finalfeatureID), collapse=", "), ")", sep="" ))
-          
-          			## save in process file.
-         	 		processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some REFERENCE features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
-         		 	write.table(processout, file=finalfile,row.names=FALSE)
-        		}
-        
-        		## save in process file.
-        		processout <- rbind(processout,"Please remove duplicate rows in the list above. ")
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-        		stop("Please remove duplicate rows in the list above.\n")		
-			} # end flag duplicate for reference
-      
-			if (flagduplicate.l) {
-        
-        		## first, which run has duplicates
-        		runstructure <- apply ( structure.l, 2, function ( x ) sum ( x[!is.na(x)] > 1 )>0 )
-        
-        		runID <- names(runstructure[runstructure == TRUE])
-        
-        		## then for each run, which features have duplicates,
-        		for (j in 1:length(runID)) {
-          
-          			nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-          			                                            "GROUP_ORIGINAL", 
-          			                                            "GROUP", 
-          			                                            "SUBJECT", 
-          			                                            "SUBJECT_NESTED", 
-          			                                            "RUN", 
-          			                                            "FRACTION")])
-          
-          			featureID <- structure.l[, colnames(structure.l)==runID[j]]
-          			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
-          
-          			message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some ENDOGENOUS features (", paste(names(finalfeatureID), collapse=", "),")", sep="" ))
-          
-          			## save in process file.
-          			processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some ENDOGENOUS features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
-          			write.table(processout, file=finalfile,row.names=FALSE)
-        		}
-        
-				## save in process file.
-				processout <- rbind(processout,"ERROR : Please remove duplicate rows in the list above. ")
-				write.table(processout, file=finalfile, row.names=FALSE)
-        
-				stop("ERROR : Please remove duplicate rows in the list above.\n")		
-			} # end flag duplicate for endogenous
-      
-			## no missing and no duplicates
-			if (!flagmissing.h & !flagmissing.l & !flagduplicate.h & !flagduplicate.l) {
-        		processout <- rbind(processout, c("Balanced data format with NA for missing feature intensities - okay"))
-        		write.table(processout, file=finalfile, row.names=FALSE)
-			} 		 
-		} # end 1 method
-    
-	} else { # multiple fractionations
-    
-    	allflagmissing <- NULL
-		allflagduplicate <- NULL
-    
-    	## check each method
-    	for (k in 1:length(unique(work$FRACTION))) {
-    	    worktemp <- work[work$FRACTION == k, ]
-			worktemp$RUN <- factor(worktemp$RUN)
-			worktemp$FEATURE <- factor(worktemp$FEATURE)
-      
-			structure <- tapply ( worktemp$ABUNDANCE, list ( worktemp$FEATURE, worktemp$RUN ) , function ( x ) length ( x ) ) 
-      
-			## structure value should be 2 for labeled, 1 for label-free, if not there are missingness
-			if (nlevels(worktemp$LABEL) == 2) { ## label-based
-				flag = sum(is.na(structure)) > 0 | sum(structure[!is.na(structure)] < 2) > 0
-			} else {  ## label-free
-				flag = sum(is.na(structure)) > 0
-			}
-      
-			allflagmissing <- c(allflagmissing,flag)
-			
-			## for duplicate
-			if (nlevels(worktemp$LABEL) == 2) { # label-based
-        	    worktemp.h <- worktemp[worktemp$LABEL == "H", ]
-        		worktemp.l <- worktemp[worktemp$LABEL == "L", ]
-        
-        		structure.h <- tapply ( worktemp.h$ABUNDANCE, list ( worktemp.h$FEATURE, worktemp.h$RUN ) , function ( x ) length ( x ) ) 
-        		structure.l <- tapply ( worktemp.l$ABUNDANCE, list ( worktemp.l$FEATURE, worktemp.l$RUN ) , function ( x ) length ( x ) ) 
-        
-        		flagduplicate <- sum(structure.h[!is.na(structure.h)] > 1) > 0 | sum(structure.l[!is.na(structure.l)] > 1) > 0
-        
-      		} else {  # label-free
-        		flagduplicate <- sum(structure[!is.na(structure)]>1) > 0
-      		}
-      
-      		allflagduplicate <- c(allflagduplicate, flag)
-      
-    	} # end to check any flag among methods
-    
-    	if ( sum(allflagmissing) != 0 ) {
-			processout <- rbind(processout, c("CAUTION: the input dataset has incomplete rows. Missing feature intensities should be present in the dataset, and their intensities should be indicated with 'NA'. The incomplete rows are listed below."))
-      	    write.table(processout, file=finalfile, row.names=FALSE)
-      
-			message("CAUTION : the input dataset has incomplete rows. Missing feature intensities should be present in the dataset, and their intensities should be indicated with 'NA'. The incomplete rows are listed below.")
-      
-			## for missign row, need to assign before looping
-			missingwork <- NULL
-      
-			missingcomplete.h <- NULL
-			missingcomplete.l <- NULL
-			missingwork.h <- NULL
-			missingwork.l <- NULL
-      
-		    for (k in 1:length(unique(work$FRACTION))) {
-        
-        	    ## see which method has missing rows
-        		if (allflagmissing[k]) {
-          		    worktemp <- work[work$FRACTION==k, ]
-          			worktemp$RUN <- factor(worktemp$RUN)
-          			worktemp$FEATURE <- factor(worktemp$FEATURE)
-          
-          			if (nlevels(worktemp$LABEL) == 1) { ## label-free
-            
-            			structure = tapply ( worktemp$ABUNDANCE, list ( worktemp$FEATURE, worktemp$RUN ) , function ( x ) length ( x ) ) 
-            
-            			## first, which run has missing	
-            			runstructure <- apply ( structure, 2, function ( x ) sum ( is.na ( x ) ) ) > 0
-            
-            			## get the name of Run
-            			runID <- names(runstructure[runstructure==TRUE])
-            
-            			## then for each run, which features are missing,
-            			for (j in 1:length(runID)) {
-              
-              				nameID <- unique(worktemp[worktemp$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-              				                                                    "GROUP_ORIGINAL", 
-              				                                                    "GROUP", 
-              				                                                    "SUBJECT", 
-              				                                                    "SUBJECT_NESTED", 
-              				                                                    "RUN", 
-              				                                                    "FRACTION")])
-              
-              				## get feature ID
-              				featureID <- structure[, colnames(structure)==runID[j]]
-              
-              				## get feature ID which has no measuremnt.
-              				finalfeatureID <- featureID[is.na(featureID)]
-              
-              				## print features ID	 	
-              				message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some features (", paste(names(finalfeatureID), collapse=", "),")", sep="" ))
-              
-              				## save in process file.
-              				processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
-              				write.table(processout, file=finalfile, row.names=FALSE)
-              
-              				## add missing rows if option is TRUE
-              				if (fillIncompleteRows) {
-                
-                				tempTogetfeature <- work[which(work$FEATURE %in% names(finalfeatureID)), ]
-                
-                				## get PROTEIN and FEATURE infomation
-                				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-                
-                				## merge feature info and run info as 'work' format
-                				tempmissingwork <- data.frame(tempfeatureID, 
-                				                              LABEL="L",
-                				                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-                				                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-                				                              RUN=nameID$RUN, 
-                				                              GROUP=nameID$GROUP, 
-                				                              SUBJECT=nameID$SUBJECT, 
-                				                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-                				                              INTENSITY=NA, 
-                				                              ABUNDANCE=NA, 
-                				                              FRACTION=nameID$FRACTION)	
-                
-               			 		## merge with tempary space, missingwork
-                				missingwork <- rbind(missingwork, tempmissingwork)
-              				} # end fillIncompleteRows options
-            			} # end loop for run
-            
-          			} else { # end label-free
-            
-            			## label-based
-            			## count the reference and endobenous separately
-            			work.l <- worktemp[worktemp$LABEL=="L", ]
-            			work.h <- worktemp[worktemp$LABEL=="H", ]
-            
-            			## get feature by Run count of data
-            			structure.l <- tapply ( work.l$ABUNDANCE, list(work.l$FEATURE, work.l$RUN), function (x) length (x) ) 
-            			structure.h <- tapply ( work.h$ABUNDANCE, list(work.h$FEATURE, work.h$RUN), function (x) length (x) ) 
-            
-            			## 1. reference peptides
-            			featurestructure.h <- apply(structure.h, 1, function (x) sum(is.na(x)))
-            
-            			## get feature ID of reference which are completely missing across run
-            			featureID.h <- names(featurestructure.h[featurestructure.h==ncol(structure.h)])
-            
-            			if (length(featureID.h) > 0) {
-              				## print message
-              				message(paste("CAUTION : some REFERENCE features have missing intensities in all the runs. The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "),". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep=""))
-              
-              				## save in process file.
-              				processout <- rbind(processout,c(paste("CAUTION : some REFERENCE features have missing intensities in all the runs. The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "),". Please check whether features in the list are correctly generated from spectral processing tool.", sep="")))
-              				write.table(processout, file=finalfile, row.names=FALSE)
-              
-              				## add missing rows if option is TRUE
-              				if (fillIncompleteRows) {
-              				    if( nrow(work.h) == 0 ){
-              				        work.h <- work[work$LABEL=="H", ]
-              				        ## get unique Run information
-              				        nameID <- unique(work.h[, c("SUBJECT_ORIGINAL", 
-              				                                    "GROUP_ORIGINAL", 
-              				                                    "GROUP", 
-              				                                    "SUBJECT", 
-              				                                    "SUBJECT_NESTED", 
-              				                                    "RUN", 
-              				                                    "FRACTION")])
-              				        nameID$FRACTION <- k
-              				    } else {
-              				        ## get unique Run information
-              				        nameID <- unique(work.h[, c("SUBJECT_ORIGINAL", 
-              				                                    "GROUP_ORIGINAL", 
-              				                                    "GROUP", 
-              				                                    "SUBJECT", 
-              				                                    "SUBJECT_NESTED", 
-              				                                    "RUN", 
-              				                                    "FRACTION")])
-              				    }
-                				
-                   			    ## get PROTEIN and FEATURE information
-                				## here use whole worktemp dataset
-                				tempTogetfeature <- worktemp[which(worktemp$FEATURE %in% featureID.h), ]
-                				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-                
-                				## then generate data.frame for missingness,
-                				for (j in 1:nrow(nameID)) {
-                  
-                  					## merge feature info and run info as 'work' format
-                  					tempmissingwork <- data.frame(tempfeatureID, 
-                  					                              LABEL="H",
-                  					                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], 
-                  					                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], 
-                  					                              RUN=nameID$RUN[j], 
-                  					                              GROUP=nameID$GROUP[j], 
-                  					                              SUBJECT=nameID$SUBJECT[j], 
-                  					                              SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], 
-                  					                              INTENSITY=NA, 
-                  					                              ABUNDANCE=NA, 
-                  					                              FRACTION=nameID$FRACTION[j])	
-                  
-                  					## merge with tempary space, missingwork
-                  					missingcomplete.h <- rbind(missingcomplete.h, tempmissingwork)
-                				}
-              			    } # end fillIncompleteRows option
-						} # end for reference peptides
-            
-            			## 2. endogenous peptides
-            			featurestructure.l <- apply(structure.l, 1, function (x) sum(is.na(x)))
-            
-            			## get feature ID of reference which are completely missing across run
-            			featureID.l <- names(featurestructure.l[featurestructure.l==ncol(structure.l)])
-            
-            			if (length(featureID.l) > 0) {
-            			    ## print message
-              				message(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. The completely missing ENDOGENOUS features are ", paste(featureID.l, collapse=", "), ". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep=""))
-              
-              				## save in process file.
-              				processout <- rbind(processout, c(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. The completely missing ENCOGENOUS features are ", paste(featureID.l, collapse=", "),". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep="")))
-              				write.table(processout, file=finalfile, row.names=FALSE)
-              
-              				## add missing rows if option is TRUE
-              				if (fillIncompleteRows) {
-                
-                			    ## get unique Run information
-                				nameID <- unique(work.l[, c("SUBJECT_ORIGINAL", 
-                				                            "GROUP_ORIGINAL", 
-                				                            "GROUP", 
-                				                            "SUBJECT", 
-                				                            "SUBJECT_NESTED", 
-                				                            "RUN", 
-                				                            "FRACTION")])
-                
-                				## get PROTEIN and FEATURE information
-                				## here use whole worktemp dataset
-                				tempTogetfeature <- worktemp[which(worktemp$FEATURE %in% featureID.l), ]
-                				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-                
-                				## then generate data.frame for missingness,
-                				for(j in 1:nrow(nameID)) {
-                  
-                  					## merge feature info and run info as 'work' format
-                  					tempmissingwork <- data.frame(tempfeatureID, 
-                  					                              LABEL="L",
-                  					                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], 
-                  					                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], 
-                  					                              RUN=nameID$RUN[j], 
-                  					                              GROUP=nameID$GROUP[j], 
-                  					                              SUBJECT=nameID$SUBJECT[j], 
-                  					                              SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], 
-                  					                              INTENSITY=NA, 
-                  					                              ABUNDANCE=NA, 
-                  					                              FRACTION=nameID$FRACTION[j])	
-                  
-                  					## merge with tempary space, missingwork
-                  					missingcomplete.l <- rbind(missingcomplete.l, tempmissingwork)
-                				}
-              				} # end fillIncompleteRows option
-            			} # end endogenous peptides
-            
-						## second, check other some missingness
-            
-            			## structure value should be 1 for reference and endogenous separately, if not there are missingness. if more there are duplicates.
-            
-            			## if count of NA is not zero and not number of run (excluding complete missingness across runs)
-            			missing.l <- names(featurestructure.l[featurestructure.l!=ncol(structure.l) & featurestructure.l != 0])
-            			missing.h <- names(featurestructure.h[featurestructure.h!=ncol(structure.h) & featurestructure.h != 0])
-            
-            			flagmissing.l <- length(missing.l) > 0
-            			flagmissing.h <- length(missing.h) > 0
-            
-            			## structure value is greater than 1, there are duplicates
-           	 			flagduplicate.l <- sum(structure.l[!is.na(structure.l)] > 1) > 0
-            			flagduplicate.h <- sum(structure.h[!is.na(structure.h)] > 1) > 0
-            
-            			## if there is missing rows for endogenous
-            			if (flagmissing.l | flagmissing.h) {
-              				processout <- rbind(processout, c("CAUTION: the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below."))
-              				write.table(processout, file=finalfile, row.names=FALSE)
-              
-              				message("CAUTION : the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below.")
-              
-             				## endogenous intensities
-              				if (flagmissing.l) {
-                
-                				## first, which run has missing	
-                				runstructure <- apply ( structure.l[-which(rownames(structure.l) %in% featureID.l),], 2, function ( x ) sum ( is.na ( x ) ) ) > 0
-                
-                				## get the name of Run
-                				runID <- names(runstructure[runstructure==TRUE])
-                
-                				## then for each run, which features are missing,
-                				for (j in 1:length(runID)) {
-                  
-                  					## get subject, group information for this run
-                  					nameID <- unique(work.l[work.l$RUN==runID[j], c("SUBJECT_ORIGINAL", 
-                  					                                                "GROUP_ORIGINAL", 
-                  					                                                "GROUP", 
-                  					                                                "SUBJECT", 
-                  					                                                "SUBJECT_NESTED", 
-                  					                                                "RUN", 
-                  					                                                "FRACTION")])
-                  
-                  					## get feature ID
-                  					featureID <- structure.l[-which(rownames(structure.l) %in% featureID.l), colnames(structure.l)==runID[j]]
-                  
-                  					## get feature ID which has no measuremnt.
-                  					finalfeatureID <- featureID[is.na(featureID)]
-                  
-                  					## print features ID	 	
-                  					message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[, "GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(names(finalfeatureID), collapse=", "),")", sep="" ))
-                  
-                  					## save in process file.
-                  					processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
-                  					write.table(processout, file=finalfile, row.names=FALSE)
-                  
-                  					## add missing rows if option is TRUE
-                  					if (fillIncompleteRows) {
-                    
-                    					tempTogetfeature <- work.l[which(work.l$FEATURE %in% names(finalfeatureID)), ]
-                    
-                    					## get PROTEIN and FEATURE infomation
-                    					tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-                    
-                    					## merge feature info and run info as 'work' format
-                    					tempmissingwork <- data.frame(tempfeatureID, 
-                    					                              LABEL="L",
-                    					                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-                    					                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-                    					                              RUN=nameID$RUN, 
-                    					                              GROUP=nameID$GROUP, 
-                    					                              SUBJECT=nameID$SUBJECT, 
-                    					                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-                    					                              INTENSITY=NA, 
-                    					                              ABUNDANCE=NA, 
-                    					                              FRACTION=nameID$FRACTION)	
-                    
-                    					## merge with tempary space, missingwork
-                    					missingwork.l <- rbind(missingwork.l, tempmissingwork)
-                  					} # end fillIncompleteRows options
-                				} # end loop for run ID
-              				} # end for endogenous
-              
-              				## reference intensities
-              				if (flagmissing.h) {
-                
-                				## first, which run has missing	
-                				runstructure <- apply ( structure.h[-which(rownames(structure.h) %in% featureID.h),], 2, function ( x ) sum ( is.na ( x ) ) ) > 0
-                
-                				## get the name of Run
-                				runID <- names(runstructure[runstructure==TRUE])
-                
-                				## then for each run, which features are missing,
-                				for (j in 1:length(runID)) {
-                  
-                  					## get subject, group information for this run
-                  					nameID <- unique(work.h[work.h$RUN==runID[j], c("SUBJECT_ORIGINAL",
-                  					                                                "GROUP_ORIGINAL",
-                  					                                                "GROUP",
-                  					                                                "SUBJECT",
-                  					                                                "SUBJECT_NESTED",
-                  					                                                "RUN",
-                  					                                                "FRACTION")])
-                  
-                  					## get feature ID
-                  					featureID <- structure.h[-which(rownames(structure.h) %in% featureID.h), colnames(structure.h)==runID[j]]
-                  
-                  					## get feature ID which has no measuremnt.
-                  					finalfeatureID <- featureID[is.na(featureID)]
-                  
-                  					## print features ID	 	
-                  					message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(names(finalfeatureID), collapse=", "),")", sep="" ))
-                  
-                 					## save in process file.
-                  					processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
-                  					write.table(processout, file=finalfile,row.names=FALSE)
-                  
-                  					## add missing rows if option is TRUE
-                  					if (fillIncompleteRows) {
-                    
-                    					tempTogetfeature <- work.h[which(work.h$FEATURE %in% names(finalfeatureID)), ]
-                    
-                    					## get PROTEIN and FEATURE infomation
-                    					tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
-                    
-                    					## merge feature info and run info as 'work' format
-                    					tempmissingwork <- data.frame(tempfeatureID, 
-                    					                              LABEL="H",
-                    					                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
-                    					                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
-                    					                              RUN=nameID$RUN, 
-                    					                              GROUP=nameID$GROUP, 
-                    					                              SUBJECT=nameID$SUBJECT, 
-                    					                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
-                    					                              INTENSITY=NA, 
-                    					                              ABUNDANCE=NA, 
-                    					                              FRACTION=nameID$FRACTION)	
-                    
-                    					## merge with tempary space, missingwork
-                    					missingwork.h <- rbind(missingwork.h, tempmissingwork)
-                  					} # end fillIncompleteRows options
-                				} # end loop for run ID
-              				} # end for endogenous
-            			} # end any missingness
-					} # end label-based
-        		} # if only any flag for method
-      		} # end loop for methods
-      
-			if (fillIncompleteRows) {
-        
-        		## merge with work
-        		## in future, use rbindlist?? rbindlist(list(work, missingwork))
-        		if (nlevels(worktemp$LABEL) == 1) {
-         			work <- rbind(work, missingwork)
-        		} else {
-          			work <- rbind(work, missingcomplete.l, missingcomplete.h, missingwork.l, missingwork.h)
-        		}	
-        
-        		## print message
-        		message("\n DONE : Incomplete rows for missing peaks are added with intensity values=NA. \n")
-        
-        		## save in process file.
-        		processout <- rbind(processout, "Incomplete rows for missing peaks are added with intensity values=NA. - done, Okay")
-        		write.table(processout, file=finalfile,row.names=FALSE)
-        
-      		} else if (!is.null(missingcomplete.l) | !is.null(missingcomplete.h) | !is.null(missingwork.l) | !is.null(missingwork.l) | !is.null(missingwork)) {
-        
-        		## save in process file.
-        		processout <- rbind(processout, "Please check whether features in the list are generated from spectral processing tool. Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
-        		write.table(processout, file=finalfile, row.names=FALSE)
-        
-        		stop("Please check whether features in the list are generated from spectral processing tool. Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
-        
-			}  
-      
-    	} else {
-      		processout <- rbind(processout, c("Balanced data format with NA for missing feature intensities - okay"))
-      		write.table(processout, file=finalfile, row.names=FALSE)
-    	}
-    
-    ## for duplicate, in future
-    
-	} # end multiple method
+	## label-free experiments
+	if (nlevels(work$LABEL) == 1) {
   
+  		## get feature by Run count of data
+  		structure = tapply ( work$ABUNDANCE, list ( work$FEATURE, work$RUN ) , function ( x ) length ( x ) ) 
+  
+  		## structure value should be 1 for label-free, if not there are missingness. if more there are duplicates.
+  
+  		flagmissing = sum(is.na(structure)) > 0
+  		flagduplicate = sum(structure[!is.na(structure)]>1) > 0
+  
+  		### if there is missing rows
+  		if ( flagmissing ) {
+    		processout <- rbind(processout, c("CAUTION: the input dataset has incomplete rows. 
+    		                                  If missing peaks occur they should be included in the dataset as separate rows, 
+    		                                  and the missing intensity values should be indicated with 'NA'. 
+    		                                  The incomplete rows are listed below."))
+    		write.table(processout, file=finalfile,row.names=FALSE)
+    
+    		message("CAUTION : the input dataset has incomplete rows. 
+    		        If missing peaks occur they should be included in the dataset as separate rows, 
+    		        and the missing intensity values should be indicated with 'NA'. 
+    		        The incomplete rows are listed below.")
+    
+    		## first, which run has missing	
+    		runstructure <- apply ( structure, 2, function ( x ) sum ( is.na ( x ) ) ) > 0
+    
+    		## get the name of Run
+    		runID <- names(runstructure[runstructure==TRUE])
+    
+    		## for missign row, need to assign before looping
+   			missingwork <- NULL
+    
+    		## then for each run, which features are missing,
+			for(j in 1:length(runID)) {
+      
+			    ## get subject, group information for this run
+				nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL","GROUP_ORIGINAL",
+				                                                "GROUP","SUBJECT","SUBJECT_NESTED",
+				                                                "RUN","FRACTION")])
+      
+				## get feature ID
+				featureID <- structure[,colnames(structure)==runID[j]]
+      
+				## get feature ID which has no measuremnt.
+				finalfeatureID <- featureID[is.na(featureID)]
+      
+				## print features ID	 	
+				message(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
+				                  ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
+				                  " has incomplete rows for some features (", 
+				                  paste(names(finalfeatureID), collapse=", "), ")"))
+      
+				## save in process file.
+				processout <- rbind(processout, c(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
+				                                            ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
+				                                            " has incomplete rows for some features (", 
+				                                            paste(names(featureID[is.na(featureID)]), collapse=", "), ")")))
+				write.table(processout, file=finalfile, row.names=FALSE)
+      
+				## add missing rows if option is TRUE
+				if (fillIncompleteRows) {
+        
+        	        tempTogetfeature <- work[which(work$FEATURE %in% names(finalfeatureID)), ]
+        
+        			## get PROTEIN and FEATURE infomation
+        			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
+        
+        			## merge feature info and run info as 'work' format
+        			tempmissingwork <- data.frame(tempfeatureID, 
+        			                              LABEL="L",
+        			                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
+        			                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
+        			                              RUN=nameID$RUN, 
+        			                              GROUP=nameID$GROUP, 
+        			                              SUBJECT=nameID$SUBJECT, 
+        			                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
+        			                              INTENSITY=NA, 
+        			                              ABUNDANCE=NA, 
+        			                              FRACTION=nameID$FRACTION)	
+        
+        			## merge with tempary space, missingwork
+        			missingwork <- rbind(missingwork, tempmissingwork)
+      			} # end fillIncompleteRows options
+    		} # end loop for run ID
+    
+    		## [THT: this part can probably be merged into the above. 
+    		## Also, it might be better to check fillIncompleteRows earlier
+    		## and terminate the process when it's FALSE]
+    		if (fillIncompleteRows) {
+      
+      			## merge with work
+      			## in future, use rbindlist?? rbindlist(list(work, missingwork))
+      			work <- rbind(work, missingwork)
+      
+      			## print message
+      			message("\n DONE : Incomplete rows for missing peaks are added with intensity values=NA. \n")
+      
+      			## save in process file.
+      			processout <- rbind(processout, "Incomplete rows for missing peaks are added with intensity values=NA. - done, Okay")
+      			write.table(processout, file=finalfile, row.names=FALSE)
+      
+    		} else {
+      
+      			## save in process file.
+      			processout <- rbind(processout,"Please check whether features in the list are generated from spectral processing tool. 
+      			                    Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
+      			write.table(processout, file=finalfile,row.names=FALSE)
+      
+      			stop("Please check whether features in the list are generated from spectral processing tool or not. 
+      			     Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
+      
+    		}
+  		} # end for flag missing
+  		
+		## if there are duplicates measurements
+		if (flagduplicate) {
+    
+    		## first, which run has duplicates
+    		runstructure <- apply ( structure, 2, function ( x ) sum (x[!is.na(x)] > 1 ) > 0 )
+    
+    		runID <- names(runstructure[runstructure==TRUE])
+    
+    		## then for each run, which features have duplicates,
+    		for(j in 1:length(runID)) {
+      
+      			nameID <- unique(work[work$RUN == runID[j], c("SUBJECT_ORIGINAL", "GROUP_ORIGINAL", 
+      			                                              "GROUP","SUBJECT", "SUBJECT_NESTED", 
+      			                                              "RUN", "FRACTION")])
+      
+      			featureID <- structure[, colnames(structure)==runID[j]]
+      			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
+      
+      			message(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]),
+      			              ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
+      			              " has multiple rows (duplicate rows) for some features (", 
+      			              paste(names(finalfeatureID), collapse=", "), ")"))
+      
+      			## save in process file.
+      			processout <- rbind(processout, c(paste0("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]), 
+      			                                        ", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), 
+      			                                        " has multiple rows (duplicate rows) for some features (", 
+      			                                        paste(names(featureID[is.na(featureID)]), collapse=", "), ")")))
+      			write.table(processout, file=finalfile, row.names=FALSE)
+    		}
+    
+    		## save in process file.
+    		processout <- rbind(processout,"Please remove duplicate rows in the list above. ")
+    		write.table(processout, file=finalfile,row.names=FALSE)
+    
+    		stop("Please remove duplicate rows in the list above.\n")		
+		} # end flag duplicate
+  
+	    	## no missing and no duplicates
+  		if (!flagmissing & !flagduplicate) {
+    		processout <- rbind(processout, c("Balanced data format with NA for missing feature intensities - okay"))
+    		write.table(processout, file=finalfile, row.names=FALSE)
+  		} 
+  
+  		## end label-free
+	} else { 
+  
+		## label-based experiment
+  
+  		## count the reference and endobenous separately
+  		work.l <- work[work$LABEL == "L", ]
+  		work.h <- work[work$LABEL == "H", ]
+   
+  		## get feature by Run count of data
+  		structure.l <- tapply(work.l$ABUNDANCE, list(work.l$FEATURE, work.l$RUN), function (x) length (x) ) 
+  		structure.h <- tapply(work.h$ABUNDANCE, list(work.h$FEATURE, work.h$RUN), function (x) length (x) ) 
+       
+		## first, check some features which completely missing across run
+  		missingcomplete.l <- NULL	
+  		missingcomplete.h <- NULL	
+  
+  		## 1. reference peptides
+  		featurestructure.h <- apply(structure.h, 1, function (x) sum(is.na(x)))
+  
+  		## get feature ID of reference which are completely missing across run
+  		featureID.h <- names(featurestructure.h[featurestructure.h == ncol(structure.h)])
+  
+  		if (length(featureID.h) > 0) {
+    		## print message
+    		message(paste0("CAUTION : some REFERENCE features have missing intensities in all the runs. 
+    		              The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "), 
+    		              ". Please check whether features in the list are correctly generated from spectral processing tool. \n"))
+    
+			## save in process file.
+			processout <- rbind(processout,c(paste("CAUTION : some REFERENCE features have missing intensities in all the runs. 
+			                                       The completely missing REFERENCE features are ", paste(featureID.h, collapse=", "), 
+			                                       ". Please check whether features in the list are correctly generated from spectral processing tool.", sep="")))
+			write.table(processout, file=finalfile, row.names=FALSE)
+    
+    		## add missing rows if option is TRUE
+    		if (fillIncompleteRows) {
+      
+      			## get unique Run information
+      			nameID <- unique(work.h[, c("SUBJECT_ORIGINAL", "GROUP_ORIGINAL", "GROUP", "SUBJECT", "SUBJECT_NESTED", "RUN", "FRACTION")])
+      
+      			## get PROTEIN and FEATURE information
+       			## here use whole work dataset
+      			tempTogetfeature <- work[which(work$FEATURE %in% featureID.h), ]
+      			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
+      
+      			## then generate data.frame for missingness,
+      			#for(j in 1:nrow(nameID)) {
+        
+       			#	## merge feature info and run info as 'work' format
+        		#	tempmissingwork <- data.frame(tempfeatureID, LABEL="H",GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], RUN=nameID$RUN[j], GROUP=nameID$GROUP[j], SUBJECT=nameID$SUBJECT[j], SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], INTENSITY=NA, ABUNDANCE=NA, METHOD=nameID$METHOD[j])	
+        
+        		#	## merge with tempary space, missingwork
+        		#	missingcomplete.h <- rbind(missingcomplete.h, tempmissingwork)
+      			#}
+            
+      			# MC : 2016.04.21 : use merge for simplicity
+      			tmp <- merge(nameID, tempfeatureID, by=NULL)
+      			missingcomplete.h <- data.frame(PROTEIN=tmp$PROTEIN, 
+      			                                PEPTIDE=tmp$PEPTIDE, 
+      			                                TRANSITION=tmp$TRANSITION, 
+      			                                FEATURE=tmp$FEATURE, 
+      			                                LABEL="H", 
+      			                                GROUP_ORIGINAL=tmp$GROUP_ORIGINAL, 
+      			                                SUBJECT_ORIGINAL=tmp$SUBJECT_ORIGINAL, 
+      			                                RUN=tmp$RUN, 
+      			                                GROUP=tmp$GROUP, 
+      			                                SUBJECT=tmp$SUBJECT, 
+      			                                SUBJECT_NESTED=tmp$SUBJECT_NESTED, 
+      			                                INTENSITY=NA, 
+      			                                ABUNDANCE=NA, 
+      			                                FRACTION=tmp$FRACTION)
+      			rm(tmp)
+            
+    		}	# end fillIncompleteRows option     
+  		} # end for reference peptides
+  
+  		## 2. endogenous peptides
+  		featurestructure.l <- apply(structure.l, 1, function (x) sum(is.na(x)))
+  
+  		## get feature ID of reference which are completely missing across run
+  		featureID.l <- names(featurestructure.l[featurestructure.l == ncol(structure.l)])
+  
+  		if (length(featureID.l) > 0) {
+    		## print message
+    		message(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. 
+    		              The completely missing ENDOGENOUS features are ", paste(featureID.l, collapse=", "), 
+    		              ". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep=""))
+    
+    		## save in process file.
+    		processout <- rbind(processout,c(paste("CAUTION : some ENDOGENOUS features have missing intensities in all the runs. 
+    		                                       The completely missing ENDOGENOUS features are ", 
+    		                                       paste(featureID.l, collapse=", "),
+    		                                       ". Please check whether features in the list are correctly generated from spectral processing tool. \n", sep="")))
+    		write.table(processout, file=finalfile, row.names=FALSE)
+    
+    		## add missing rows if option is TRUE
+    		if (fillIncompleteRows) {
+      
+      			## get unique Run information
+      			nameID <- unique(work.l[, c("SUBJECT_ORIGINAL", 
+      			                            "GROUP_ORIGINAL", 
+      			                            "GROUP", 
+      			                            "SUBJECT", 
+      			                            "SUBJECT_NESTED", 
+      			                            "RUN", 
+      			                            "FRACTION")])
+      
+      			## get PROTEIN and FEATURE information
+      			## here use whole work dataset
+      			tempTogetfeature <- work[which(work$FEATURE %in% featureID.l), ]
+      			tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
+      
+      			## then generate data.frame for missingness,
+      			#for (j in 1:nrow(nameID)) {
+        
+        		#	## merge feature info and run info as 'work' format
+        		#	tempmissingwork <- data.frame(tempfeatureID, LABEL="L",GROUP_ORIGINAL=nameID$GROUP_ORIGINAL[j], SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL[j], RUN=nameID$RUN[j], GROUP=nameID$GROUP[j], SUBJECT=nameID$SUBJECT[j], SUBJECT_NESTED=nameID$SUBJECT_NESTED[j], INTENSITY=NA, ABUNDANCE=NA, METHOD=nameID$METHOD[j])	
+        
+        		#	## merge with tempary space, missingwork
+        		#	missingcomplete.l <- rbind(missingcomplete.l, tempmissingwork)
+      			#}
+            
+                # MC : 2016.04.21 : use merge for simplicity
+                tmp <- merge(nameID, tempfeatureID, by=NULL)
+      			missingcomplete.l <- data.frame(PROTEIN=tmp$PROTEIN, 
+      			                                PEPTIDE=tmp$PEPTIDE, 
+      			                                TRANSITION=tmp$TRANSITION, 
+      			                                FEATURE=tmp$FEATURE, 
+      			                                LABEL="L", 
+      			                                GROUP_ORIGINAL=tmp$GROUP_ORIGINAL, 
+      			                                SUBJECT_ORIGINAL=tmp$SUBJECT_ORIGINAL, 
+      			                                RUN=tmp$RUN, 
+      			                                GROUP=tmp$GROUP, 
+      			                                SUBJECT=tmp$SUBJECT, 
+      			                                SUBJECT_NESTED=tmp$SUBJECT_NESTED, 
+      			                                INTENSITY=NA, 
+      			                                ABUNDANCE=NA, 
+      			                                FRACTION=tmp$FRACTION)
+    		    rm(tmp)
+            } # end fillIncompleteRows option
+  		} # end endogenous peptides
+      
+		## second, check other some missingness
+  
+  		## for missign row, need to assign before looping. need to assign at the beginning because it need either cases, with missingness or not
+  		missingwork.l <- NULL
+  		missingwork.h <- NULL
+  
+ 		## structure value should be 1 for reference and endogenous separately, if not there are missingness. if more there are duplicates.
+  
+  		## if count of NA is not zero and not number of run (excluding complete missingness across runs)
+  
+  		missing.l <- names(featurestructure.l[featurestructure.l != ncol(structure.l) & featurestructure.l != 0])
+  		missing.h <- names(featurestructure.h[featurestructure.h != ncol(structure.h) & featurestructure.h != 0])
+  
+		flagmissing.l = length(missing.l) > 0
+		flagmissing.h = length(missing.h) > 0
+  
+		## structure value is greater than 1, there are duplicates
+		flagduplicate.l = sum(structure.l[!is.na(structure.l)] > 1) > 0
+		flagduplicate.h = sum(structure.h[!is.na(structure.h)] > 1) > 0
+  
+  		## if there is missing rows for endogenous
+  		if ( flagmissing.l | flagmissing.h ) {
+    		processout <- rbind(processout,c("CAUTION: the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below."))
+    		write.table(processout, file=finalfile, row.names=FALSE)
+    
+   			message("CAUTION : the input dataset has incomplete rows. If missing peaks occur they should be included in the dataset as separate rows, and the missing intensity values should be indicated with 'NA'. The incomplete rows are listed below.")
+    
+    		## endogenous intensities
+    		if (flagmissing.l) {
+      
+                if (length(missing.l) > 1){
+      			    runstructure <- apply ( structure.l[which(rownames(structure.l) %in% missing.l), ], 2, function ( x ) sum ( is.na ( x ) ) ) > 0
+      			} else if (length(missing.l) == 1) {
+      			    runstructure <- is.na ( structure.l[which(rownames(structure.l) %in% missing.l), ]) > 0
+      			}
+      			
+      			## get the name of Run
+      			runID <- names(runstructure[runstructure==TRUE])
+      
+      			## then for each run, which features are missing,
+      			for(j in 1:length(runID)) {
+        
+        			## get subject, group information for this run
+        			nameID <- unique(work.l[work.l$RUN==runID[j], c("SUBJECT_ORIGINAL", 
+        			                                                "GROUP_ORIGINAL", 
+        			                                                "GROUP", 
+        			                                                "SUBJECT", 
+        			                                                "SUBJECT_NESTED", 
+        			                                                "RUN", 
+        			                                                "FRACTION")])
+        
+        			# MC : 2016/04/21. if there is one row, can't catch up data.frame
+        			## get feature ID
+        			if (length(missing.l) > 1){
+        			    featureID <- structure.l[which(rownames(structure.l) %in% missing.l), colnames(structure.l) == runID[j]]
+        			  
+        			    ## get feature ID which has no measuremnt.
+        			    finalfeatureID <- names(featureID[is.na(featureID)])
+        			  
+        			    ## print features ID	 	
+        			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(finalfeatureID, collapse=", "),")", sep="" ))
+        			  
+        			    ## save in process file.
+        			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", paste(finalfeatureID, collapse=", "),")", sep="" )))
+        			    write.table(processout, file=finalfile,row.names=FALSE)
+        			  
+        			} else if (length(missing.l) == 1) {
+        			  
+        			    finalfeatureID <- missing.l
+                
+        			    ## print features ID   	
+        			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", finalfeatureID,")", sep="" ))
+        			  
+        			    ## save in process file.
+        			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some ENDOGENOUS features (", finalfeatureID,")", sep="" )))
+        			    write.table(processout, file=finalfile,row.names=FALSE)
+        			  
+        			}	
+        
+        			## add missing rows if option is TRUE
+        			if (fillIncompleteRows) {
+          
+          				tempTogetfeature <- work.l[which(work.l$FEATURE %in% finalfeatureID), ]
+          
+          				## get PROTEIN and FEATURE infomation
+          				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
+          
+          				## merge feature info and run info as 'work' format
+          				tempmissingwork <- data.frame(tempfeatureID, 
+          				                              LABEL="L",
+          				                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
+          				                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
+          				                              RUN=nameID$RUN, 
+          				                              GROUP=nameID$GROUP, 
+          				                              SUBJECT=nameID$SUBJECT, 
+          				                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
+          				                              INTENSITY=NA, 
+          				                              ABUNDANCE=NA, 
+          				                              FRACTION=nameID$FRACTION)	
+          
+          				## merge with tempary space, missingwork
+          				missingwork.l <- rbind(missingwork.l,tempmissingwork)
+        			} # end fillIncompleteRows options
+      			} # end loop for run ID
+    		} # end for endogenous
+    
+    		## reference intensities
+    		if (flagmissing.h) {
+      
+      			## first, which run has missing	
+                if (length(missing.h) > 1){
+      			    runstructure <- apply ( structure.h[which(rownames(structure.h) %in% missing.h), ], 2, 
+      			                        function ( x ) sum ( is.na ( x ) ) ) > 0
+                } else if (length(missing.h) == 1) {
+                    runstructure <- is.na ( structure.h[which(rownames(structure.h) %in% missing.h), ]) > 0
+                }
+            
+      		    ## get the name of Run
+      		    runID <- names(runstructure[runstructure==TRUE])
+      
+      			## then for each run, which features are missing,
+      			for(j in 1:length(runID)) {
+        
+        			## get subject, group information for this run
+        			nameID <- unique(work.h[work.h$RUN==runID[j], c("SUBJECT_ORIGINAL", 
+        			                                                "GROUP_ORIGINAL", 
+        			                                                "GROUP", 
+        			                                                "SUBJECT", 
+        			                                                "SUBJECT_NESTED", 
+        			                                                "RUN", 
+        			                                                "FRACTION")])
+        
+        			# MC : 2016/04/21. if there is one row, can't catch up data.frame
+        			## get feature ID
+        			if (length(missing.h) > 1){
+                        featureID <- structure.h[which(rownames(structure.h) %in% missing.h), colnames(structure.h) == runID[j] ]
+                
+                        ## get feature ID which has no measuremnt.
+                        finalfeatureID <- names(featureID[is.na(featureID)])
+                
+                        ## print features ID	 	
+                        message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(finalfeatureID, collapse=", "),")", sep="" ))
+                
+                        ## save in process file.
+                        processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", paste(finalfeatureID, collapse=", "),")", sep="" )))
+                        write.table(processout, file=finalfile,row.names=FALSE)
+                
+        			} else if (length(missing.h) == 1) {
+        			 
+        			    finalfeatureID <- missing.h
+                
+        			    ## print features ID   	
+        			    message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", finalfeatureID,")", sep="" ))
+        			  
+        			    ## save in process file.
+        			    processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has incomplete rows for some REFERENCE features (", finalfeatureID,")", sep="" )))
+        			    write.table(processout, file=finalfile,row.names=FALSE)
+                
+        			}
+        			           			                         	            
+        			## add missing rows if option is TRUE
+        			if (fillIncompleteRows) {
+          
+          				tempTogetfeature <- work.h[which(work.h$FEATURE %in% finalfeatureID), ]
+          
+          				## get PROTEIN and FEATURE infomation
+          				tempfeatureID <- unique(tempTogetfeature[, c("PROTEIN", "PEPTIDE", "TRANSITION", "FEATURE")])
+          
+          				## merge feature info and run info as 'work' format
+          				tempmissingwork <- data.frame(tempfeatureID, 
+          				                              LABEL="H",
+          				                              GROUP_ORIGINAL=nameID$GROUP_ORIGINAL, 
+          				                              SUBJECT_ORIGINAL=nameID$SUBJECT_ORIGINAL, 
+          				                              RUN=nameID$RUN, 
+          				                              GROUP=nameID$GROUP, 
+          				                              SUBJECT=nameID$SUBJECT, 
+          				                              SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
+          				                              INTENSITY=NA, 
+          				                              ABUNDANCE=NA, 
+          				                              FRACTION=nameID$FRACTION)	
+          
+          				## merge with tempary space, missingwork
+          				missingwork.h <- rbind(missingwork.h, tempmissingwork)
+                                				
+        			} # end fillIncompleteRows options
+      			} # end loop for run ID
+    		} # end for endogenous  
+  		} # end for flag missing
+  
+  		## merge missing rows if fillIncompleteRows=TRUE or message.
+  		if (fillIncompleteRows) {
+    
+    		## merge with work
+    		## in future, use rbindlist?? rbindlist(list(work, missingwork))
+    		work <- rbind(work,missingcomplete.l, missingcomplete.h, missingwork.l, missingwork.h)
+    
+    		## print message
+    		message("\n DONE : Incomplete rows for missing peaks are added with intensity values=NA. \n")
+    
+    		## save in process file.
+    		processout <- rbind(processout, "Incomplete rows for missing peaks are added with intensity values=NA. - done, Okay")
+    		write.table(processout, file=finalfile, row.names=FALSE)
+    
+  		} else if (!is.null(missingcomplete.l) | 
+  		           !is.null(missingcomplete.h) | 
+  		           !is.null(missingwork.l) | 
+  		           !is.null(missingwork.l) ) {
+    
+    		## save in process file.
+   	 		processout <- rbind(processout,
+   	 		                    "Please check whether features in the list are generated from spectral processing tool. 
+   	 		                    Or the option, fillIncompleteRows=TRUE, 
+   	 		                    will add incomplete rows for missing peaks with intensity=NA.")
+    		write.table(processout, file=finalfile, row.names=FALSE)
+    
+    		stop("Please check whether features in the list are generated from spectral processing tool or not. Or the option, fillIncompleteRows=TRUE, will add incomplete rows for missing peaks with intensity=NA.")
+    
+		}
+  
+		## if there are duplicates measurements
+  		if (flagduplicate.h) {
+    
+    		## first, which run has duplicates
+    		runstructure <- apply ( structure.h, 2, function ( x ) sum ( x[!is.na(x)] > 1 )>0 )
+    
+    		runID <- names(runstructure[runstructure==TRUE])
+    
+    		## then for each run, which features have duplicates,
+    		for(j in 1:length(runID)) {
+      
+      			nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL", 
+      			                                            "GROUP_ORIGINAL", 
+      			                                            "GROUP", 
+      			                                            "SUBJECT", 
+      			                                            "SUBJECT_NESTED", 
+      			                                            "RUN", 
+      			                                            "FRACTION")])
+      
+      			featureID <- structure.h[, colnames(structure.h)==runID[j]]
+      			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
+      
+      			message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some REFERENCE features (", paste(names(finalfeatureID), collapse=", "), ")", sep="" ))
+      
+      			## save in process file.
+     	 		processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some REFERENCE features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
+     		 	write.table(processout, file=finalfile,row.names=FALSE)
+    		}
+    
+    		## save in process file.
+    		processout <- rbind(processout,"Please remove duplicate rows in the list above. ")
+    		write.table(processout, file=finalfile, row.names=FALSE)
+    
+    		stop("Please remove duplicate rows in the list above.\n")		
+		} # end flag duplicate for reference
+  
+		if (flagduplicate.l) {
+    
+    		## first, which run has duplicates
+    		runstructure <- apply ( structure.l, 2, function ( x ) sum ( x[!is.na(x)] > 1 )>0 )
+    
+    		runID <- names(runstructure[runstructure == TRUE])
+    
+    		## then for each run, which features have duplicates,
+    		for (j in 1:length(runID)) {
+      
+      			nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL", 
+      			                                            "GROUP_ORIGINAL", 
+      			                                            "GROUP", 
+      			                                            "SUBJECT", 
+      			                                            "SUBJECT_NESTED", 
+      			                                            "RUN", 
+      			                                            "FRACTION")])
+      
+      			featureID <- structure.l[, colnames(structure.l)==runID[j]]
+      			finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
+      
+      			message(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some ENDOGENOUS features (", paste(names(finalfeatureID), collapse=", "),")", sep="" ))
+      
+      			## save in process file.
+      			processout <- rbind(processout,c(paste("*** Subject : ", as.character(nameID[,"SUBJECT_ORIGINAL"]) ,", Condition : ", as.character(nameID[,"GROUP_ORIGINAL"]), " has multiple rows (duplicate rows) for some ENDOGENOUS features (", paste(names(featureID[is.na(featureID)]), collapse=", "),")", sep="" )))
+      			write.table(processout, file=finalfile,row.names=FALSE)
+    		}
+    
+			## save in process file.
+			processout <- rbind(processout,"ERROR : Please remove duplicate rows in the list above. ")
+			write.table(processout, file=finalfile, row.names=FALSE)
+    
+			stop("ERROR : Please remove duplicate rows in the list above.\n")		
+		} # end flag duplicate for endogenous
+  
+		## no missing and no duplicates
+		if (!flagmissing.h & !flagmissing.l & !flagduplicate.h & !flagduplicate.l) {
+    		processout <- rbind(processout, c("Balanced data format with NA for missing feature intensities - okay"))
+    		write.table(processout, file=finalfile, row.names=FALSE)
+		} 		 
+	} # end 1 method
 
 	## factorize GROUP, SUBJECT, GROUP_ORIGINAL, SUBJECT_ORIGINAL, SUBJECT_ORIGINAL_NESTED, FEATURE, RUN
   	## -------------------------------------------------------------------------------------------------
@@ -4672,84 +4050,3 @@ resultsAsLists <- function(x, ...) {
 	
 	return(fit.full)
 }
-
-
-
-
-#############################################
-# check whether there are multiple runs for a replicate
-# if yes, normalization should be different way.
-#############################################
-
-.countMultiRun <- function(data) {
-  
-    ## if some feature are missing for this spedific run, it could be error. that is why we need balanced design.
-    ## with balanced design (fill in NA in each row), it should have different unique number of measurments per fractionation
-    ## change it 
-    ## 2017.05 24 : however, after going through converter functions, 
-    ## with balanced design, impossible to detect fractionation
-    is.risky <- FALSE
-    
-    ## if there is fraction info and multiple value for fraction column, we don't need to count here.
-    if( any(is.element(colnames(data), 'FRACTION')) ) {
-        ## already fraction info are available. there are multiple runs.
-        out <- TRUE
-        
-    } else {
-        
-        ## there is no fraction information. First chec, whether there are tech replicates or not.
-        info <- unique(data[, c('GROUP_ORIGINAL', 'SUBJECT_ORIGINAL', 'RUN')])
-        info$condition <- paste(info$GROUP_ORIGINAL, info$SUBJECT_ORIGINAL, sep="_")
-
-        count.tech <- xtabs(~ condition, info)
-        
-        is.multiplerun <- any(count.tech > 1)
-        
-        if ( !is.multiplerun ){ 
-            ## only one run for condition*bioreplicate -> no tech replicate at all, no multiple run.
-            out <- FALSE
-        } else {
-            ## need to distinguish whether technical replicate or multiple runs.
-            ## For one specific sample, most of features are measured across runs -> tech replicate
-            ## if not, multiple runs.
-            tmp <- data[!is.na(data$ABUNDANCE), ]
-            
-            ## get on sample information
-            info.sample1 <- info[info$condition == unique(info$condition)[1], ]
-            tmp.sample1 <- tmp[tmp$GROUP_ORIGINAL == unique(info.sample1$GROUP_ORIGINAL) &
-                                   tmp$SUBJECT_ORIGINAL == unique(info.sample1$SUBJECT_ORIGINAL), ]
-            
-            standardFeature <- unique(tmp.sample1[tmp.sample1$RUN == unique(tmp.sample1$RUN[1]), 
-                                                  "FEATURE"]) 
-            tmp.sample1$RUN <- factor(tmp.sample1$RUN)
-            
-            ## get overlapped feature ID
-            countdiff <- tapply (tmp.sample1$FEATURE, 
-                                 tmp.sample1$RUN, 
-                                 function ( x ) length(intersect(unique(x), standardFeature)) ) 
-            
-            per.overlap.feature <- (countdiff)[-1] / max(unique(countdiff)) 
-            
-            ## first, technical replicate, no fraction : 
-            ## all runs should have more than 50% features should be the same.
-            if ( all( per.overlap.feature > 0.5 ) ){ ## then there are technical replicates
-                out <- FALSE
-            } else if ( all( per.overlap.feature < 0.5 ) ) {
-                out <- TRUE
-            } else {
-                ## hard to distinguish fractionation automatically. need information
-                ## if both fractionation and technical replicates are there, can't distinguish. 
-                ## need fractionation info. + even technical replicate information is needed.
-                out <- FALSE
-                is.risky <- TRUE
-            }
-        }
-    }
-    
-    result <- list(out = out,
-                   is.risky = is.risky)
-    
-    return(result)
-   
-}
-
