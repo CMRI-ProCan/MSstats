@@ -547,13 +547,14 @@ dataProcess  <-  function(raw,
   
         ## [MC : use median of medians]
         median.run.method  <-  aggregate(ABUNDANCE ~ RUN , data = work, median, na.rm = TRUE)
+        global.median <- median(median.run.method$ABUNDANCE, na.rm = TRUE)
   
         namerun <- unique(work[, "RUN"])
 
         for (i in 1:length(namerun)) {
             ## ABUNDANCE is normalized
           namerun.idx <- which(work$RUN == namerun[i])
-          work[namerun.idx, "ABUNDANCE"] <- work[namerun.idx, "ABUNDANCE"] - median.run.method[median.run.method$RUN == namerun[i], "ABUNDANCE"]
+          work[namerun.idx, "ABUNDANCE"] <- work[namerun.idx, "ABUNDANCE"] - median.run.method[median.run.method$RUN == namerun[i], "ABUNDANCE"] + global.median
         }
     
         processout <- rbind(processout, c("Normalization : Constant normalization (equalize medians) - okay"))
@@ -677,13 +678,14 @@ dataProcess  <-  function(raw,
         ## get mean among global standards
         allmean <- apply(combine,1, function(x) mean(x, na.rm=TRUE))
         ## allmean[is.na(allmean)] <- 0
+	median.all <- median(allmeantemp$allmean, na.rm=TRUE)
     
         ## adjust
         namerun <- unique(work[, "RUN"])
   
         for (i in 1:length(namerun)) {
             ## ABUNDANCE is normalized          
-            if (!is.na(allmean[names(allmean)==namerun[i]])) work[work$RUN==namerun[i],"ABUNDANCE"] <- work[work$RUN==namerun[i],"ABUNDANCE"]-allmean[names(allmean)==namerun[i]]
+            if (!is.na(allmean[names(allmean)==namerun[i]])) work[work$RUN==namerun[i],"ABUNDANCE"] <- work[work$RUN==namerun[i],"ABUNDANCE"]-allmean[names(allmean)==namerun[i]] + median.all
         }
     
         processout <- rbind(processout, c("Normalization : normalization with global standards protein - okay"))
