@@ -33,8 +33,7 @@ dataProcess  <-  function(raw,
                           cutoffCensored="minFeature",
                           MBimpute=TRUE,
                           remove50missing=FALSE,
-                          maxQuantileforCensored=0.999,
-                          clusters=NULL) {
+                          maxQuantileforCensored=0.999) {
   
     ## save process output in each step
     allfiles <- list.files()
@@ -1016,7 +1015,7 @@ dataProcess  <-  function(raw,
     rqresult <- try(.runQuantification(work, summaryMethod, equalFeatureVar, 
                                        cutoffCensored, censoredInt, remove50missing, MBimpute, 
                                        original_scale=FALSE, logsum=FALSE, featureSubset,
-                                       message.show=FALSE, clusters=clusters), silent=TRUE)
+                                       message.show=FALSE), silent=TRUE)
 
     if (class(rqresult) == "try-error") {
         message("*** error : can't summarize per subplot with ", summaryMethod, ".")
@@ -1092,7 +1091,7 @@ resultsAsLists <- function(x, ...) {
                                remove50missing, MBimpute, 
                                original_scale, logsum, 
                                featureSubset,
-                               message.show, clusters) {
+                               message.show) {
     
   ##Since the imputation has been done before feature selection, delete the columns of censoring indicator to avoid imputing the same intensity again   
   #if(featureSubset == "highQuality") {
@@ -1218,738 +1217,175 @@ resultsAsLists <- function(x, ...) {
     
         result <- NULL
       
-        ## if cluster available,
-        if(!is.null(clusters)){
-            
-            ## create cluster for paralleled workflow
-            message(paste0("Cluster Size: ", clusters,"\n"))
-            registerDoSNOW(makeCluster(clusters, type = "SOCK"))
-            
-            # for(i in 1: nlevels(data$PROTEIN)) {
-            pb <- txtProgressBar(max = nlevels(data$PROTEIN), style = 3)
-            progress <- function(n) setTxtProgressBar(pb, n)
-            opts <- list(progress = progress)
-            MS_results <- foreach(i=1: nlevels(data$PROTEIN), 
-                                  .combine='resultsAsLists', 
-                                  .options.snow = opts, 
-                                  .multicombine=TRUE, 
-                                  .init=list(list(), list())) %dopar% {
-              
-                sub <- data[data$PROTEIN==levels(data$PROTEIN)[i], ]
-                
-                if (message.show) {
-                    message(paste("Getting the summarization by Tukey's median polish per subplot for protein ",
-                                  unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), ")"))
-                }
-                
-                sub$FEATURE <- factor(sub$FEATURE)  
-           
-                ##### how to decide censored or not
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                
-                            sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
-                            sub$cen <- ifelse(sub$censored, 0, 1)
-                
-                        }
-              
-                        ### 2. all censored missing
-                        if (censoredInt == "NA") {
-                
-                            sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
-                            sub$cen <- ifelse(sub$censored, 0, 1)
-                
-                        }
-                    }
-                }
-                
-                ## if all measurements are NA,
-                if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
-                    message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                  "(", i, " of ", length(unique(data$PROTEIN)),
-                                  ") because all measurements are NAs."))
-                    # next()
-                    return(NULL)
-                }
-                
-                ## remove features which are completely NAs
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                  
-                        }
-                
-                        ### 2. all censored missing
-                        if (censoredInt == "NA") {
-                  
-                            subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-             
-                        }  
-              
-                    } 
-                } else {
-                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                }
-            
-                countfeature <- xtabs(~FEATURE, subtemp)
-                namefeature <- names(countfeature)[countfeature == 0]
-                    
-                if (length(namefeature) != 0) {
-                    sub <- sub[-which(sub$FEATURE %in% namefeature), ]
-                    
-                    if (nrow(sub) == 0) {
-                        message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                      "(", i, " of ", length(unique(data$PROTEIN)), 
-                                      ") because all measurements are NAs."))
-                        # next()
-                        return(NULL)
-                    
-                    } else {
-                        sub$FEATURE <- factor(sub$FEATURE)
-                    }
-                }
-                
-                ## remove features which have only 1 measurement.
-                namefeature1 <- names(countfeature)[countfeature == 1]
-                    
-                if (length(namefeature1) != 0) {
-                    sub <- sub[-which(sub$FEATURE %in% namefeature1), ]
-                     
-                    if (nrow(sub) == 0) {
-                        message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                      "(", i, " of ", length(unique(data$PROTEIN)), 
-                                      ") because features have only one measurement across MS runs."))
-                        # next()
-                        return(NULL)
-                    
-                    } else {
-                        sub$FEATURE <- factor(sub$FEATURE)
-                    }
-                }
-                
-                ## check one more time
-                ## if all measurements are NA,
-                if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE ==0)) ) {
-                    message(paste("After removing features which has only 1 measurement, Can't summarize for ",
-                                  unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), 
-                                  ") because all measurements are NAs."))
-                    # next()
-                    return(NULL)
-                }
-                
-                ## remove run which has no measurement at all 
-                ## remove features which are completely NAs
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                      
-                        }
-                    
-                        ### 2. all censored missing
-                        if (censoredInt == "NA") {
-                      
-                            subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                      
-                        }  
-                    
-                    } 
-                } else {
-                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                }
-                
-                count <- aggregate(ABUNDANCE ~ RUN, data=subtemp, length)
-                norun <- setdiff(unique(data$RUN), count$RUN)
-                    
-                if (length(norun) != 0 & length(intersect(norun, as.character(unique(sub$RUN))))) { 
-                    # removed NA rows already, if there is no overlapped run, error
-                    sub <- sub[-which(sub$RUN %in% norun), ]
-                    sub$RUN <- factor(sub$RUN)
-                }
-    
-                
-                if (remove50missing) {
-                    # count # feature per run
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtemp <- sub[!is.na(sub$INTENSITY), ]
-                        }
-                        
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                        }
-                    }
-                        
-                        numFea <- xtabs(~RUN, subtemp) ## RUN or run.label?
-                        numFea <- numFea/length(unique(subtemp$FEATURE))
-                        numFea <- numFea <= 0.5
-                        removerunid <- names(numFea)[numFea]
-                        
-                        ## if all measurements are NA,
-                        if (length(removerunid)==length(numFea)) {
-                            message(paste("Can't summarize for ",unique(sub$PROTEIN), 
-                                          "(", i, " of ", length(unique(data$PROTEIN)),
-                                          ") because all runs have more than 50% NAs and are removed with the option, remove50missing=TRUE."))
-                            # next()
-                            return(NULL)
-                        }
-    
-                }
-                    
-                ### check whether we need to impute or not.
-                if (sum(sub$cen == 0) > 0) {
-                
-                    ## 2. put minimum in feature level to NA
-                    if (cutoffCensored == "minFeature") {
-                        if (censoredInt == "NA") {
-                            cut <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                            
-                            ## remove runs which has more than 50% missing values
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-    
-                            for(j in 1:length(unique(cut$FEATURE))) {
-                                sub[is.na(sub$ABUNDANCE) & sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                        
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                            cut <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                            
-                            ## remove runs which has more than 50% missing values
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-                            
-                            for(j in 1:length(unique(cut$FEATURE))) {
-                                sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0  & 
-                                        sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                    }
-                    
-                    ## 3. put minimum in RUN to NA
-                    if (cutoffCensored == "minRun") {
-                    
-                        ## remove runs which has more than 50% missing values
-                        if (remove50missing) {
-                            if (length(removerunid) != 0) {
-                                sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                sub$RUN <- factor(sub$RUN)
-                            }
-                        }
-                            
-                        if (censoredInt == "NA") {
-                            cut <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
-                            ## cutoff for each Run is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-    
-                            for(j in 1:length(unique(cut$RUN))) {
-                                sub[is.na(sub$ABUNDANCE) & 
-                                        sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                        
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                            cut <- aggregate(ABUNDANCE ~ RUN, data=subtemptemp, FUN=min)
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-    
-                            for(j in 1:length(unique(cut$RUN))) {
-                                sub[!is.na(sub$ABUNDANCE) & 
-                                        sub$ABUNDANCE == 0 & 
-                                        sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                    }
-                    
-                    ## 20150829 : 4. put minimum RUN and FEATURE
-                    if (cutoffCensored == "minFeatureNRun") {
-                        if (censoredInt == "NA") {
-                            
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-    
-                            cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
-                            cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
-                            
-                            ## remove runs which has more than 50% missing values
-                            ## before removing, need to contribute min feature calculation
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-                            
-                            ## cutoff for each Run is little less than minimum abundance in a run.
-    
-                            cut.run <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
-                            cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
-                            
-                            if (length(unique(cut.fea$FEATURE)) > 1) {
-                                for(j in 1:length(unique(cut.fea$FEATURE))) {
-                                    for(k in 1:length(unique(cut.run$RUN))) {
-                                        # get smaller value for min Run and min Feature
-                                        finalcut <- min(cut.fea$ABUNDANCE[j],cut.run$ABUNDANCE[k])
-                                    
-                                        sub[is.na(sub$ABUNDANCE) & 
-                                                sub$FEATURE == cut.fea$FEATURE[j] & 
-                                                sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
-                                    }
-                                }
-                            }
-                            # if single feature, not impute
-                        }
-                        
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0,]
-    
-                            cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
-                            cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
-                                                    
-                            ## remove runs which has more than 50% missing values
-                            ## before removing, need to contribute min feature calculation
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-    
-                            cut.run <- aggregate(ABUNDANCE~RUN, data=subtemptemp, FUN=min)
-                            cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
+        pb <- txtProgressBar(max = nlevels(data$PROTEIN), style = 3)
         
-                            if (length(unique(cut.fea$FEATURE)) > 1) {
-                                for(j in 1:length(unique(cut.fea$FEATURE))) {
-                                    for(k in 1:length(unique(cut.run$RUN))) {
-                                        # get smaller value for min Run and min Feature
-                                        finalcut <- min(cut.fea$ABUNDANCE[j], cut.run$ABUNDANCE[k])
-                                    
-                                        sub[!is.na(sub$ABUNDANCE) & 
-                                                sub$ABUNDANCE == 0 & 
-                                                sub$FEATURE == cut.fea$FEATURE[j] & 
-                                                sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
-                                    }
-                                }
-                            } else { # single feature
-                        
-                                sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0, "ABUNDANCE"] <- cut.fea$ABUNDANCE
-                                
-                            }
-                        }
-                    }
-                    
-                    if (MBimpute) {
-                        
-                        if (nrow(sub[sub$cen == 0, ]) > 0) {
-                            ## impute by survival model
-                            subtemp <- sub[!is.na(sub$ABUNDANCE),]
-                            countdf <- nrow(subtemp) < (length(unique(subtemp$FEATURE))+length(unique(subtemp$RUN))-1)
-                
-                            set.seed(100)
-                            ### fit the model
-                            if (length(unique(sub$FEATURE)) == 1) {
-                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
-                                                             data=sub, dist='gaussian')
-                            }else{
-                                if (countdf) {
-                                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
-                                                                 data=sub, dist='gaussian')
-                                }else{
-                                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ FEATURE+RUN, 
-                                                                 data=sub, dist='gaussian')
-                                }
-                            }
-                    
-                            # get predicted value from survival
-                            sub <- data.frame(sub, pred=predict(fittest, newdata=sub, type="response"))
-                    
-                            # the replace censored value with predicted value
-                            sub[sub$cen == 0, "ABUNDANCE"] <- sub[sub$cen == 0, "pred"] 
-                    
-                            # save predicted value
-                            # predAbundance <- c(predAbundance,predict(fittest, newdata=sub, type="response"))
-                            #predAbundance <- c(predict(fittest, newdata=sub, type="response"))
-                        }
-                    }   
-                }
-                
-                ## then, finally remove NA in abundance
-                sub <- sub[!is.na(sub$ABUNDANCE), ]
-                                
-                if (nlevels(sub$FEATURE) > 1) { ## for more than 1 features
-                    
-                    data_w <- reshape2::dcast(RUN ~ FEATURE, data=sub, value.var='ABUNDANCE', keep=TRUE)
-                    rownames(data_w) <- data_w$RUN
-                    data_w <- data_w[, -1]
-                    data_w[data_w == 1] <- NA
-                    
-                    if (!original_scale) {
-                        
-                        meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
-                        tmpresult <- meddata$overall + meddata$row
-                        
-                        ## if fractionated sample, need to get per sample run
-                        ## ?? if there are technical replicates, how to match sample and MS run for different fractionation??
-                        
-                        #if( length(unique(sub$METHOD)) > 1 ) {
-                        #  runinfo <- unique(sub[, c("GROUP_ORIGINAL", "SUBJECT_ORIGINAL", "RUN", "METHOD")])
-                        #  runinfo$uniquesub <- paste(runinfo$GROUP_ORIGINAL, runinfo$SUBJECT_ORIGINAL, sep="_")
-                        #}
-                        
-                    } else { # original_scale
-                        data_w <- 2^(data_w)
-                        
-                        meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
-                        tmpresult <- meddata$overall + meddata$row
-                        
-                        tmpresult <- log2(tmpresult)
-                    }
-                    
-                    # count # feature per run
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtemp <- sub[!is.na(sub$INTENSITY), ]
-                            subtempimpute <- sub[is.na(sub$INTENSITY), ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
-                        }
-                    
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                            subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
-                        }
-                        
-                        subtemp$RUN <- factor(subtemp$RUN, levels = rownames(data_w))
-                        numFea <- xtabs(~RUN, subtemp)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                    
-                        subtempimpute$RUN <- factor(subtempimpute$RUN, levels = rownames(data_w))
-                        numimpute <- xtabs(~RUN, subtempimpute)
-                    
-                        sub.result <- data.frame(Protein = unique(sub$PROTEIN), 
-                                                 LogIntensities = tmpresult, 
-                                                 RUN = names(tmpresult), 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage = as.vector(numFeaPercentage), 
-                                                 more50missing = numFeaTF, 
-                                                 NumImputedFeature = as.vector(numimpute))
-                    
-                    } else {
-                        subtemp <- sub[!is.na(sub$INTENSITY), ]
-                        
-                        subtemp$RUN <- factor(subtemp$RUN, levels =rownames(data_w))
-                        numFea <- xtabs(~RUN, subtemp)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                                        
-                        sub.result <- data.frame(Protein=unique(sub$PROTEIN), 
-                                                 LogIntensities=tmpresult, 
-                                                 RUN=names(tmpresult), 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF)
-                        
-                    }
-               
-                } else { ## single feature
-                    ## single feature, use original values
-                    
-                    subtemp <- sub[!is.na(sub$ABUNDANCE),]
-                    
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtempcount <- sub[!is.na(sub$INTENSITY), ]
-                            subtempimpute <- sub[is.na(sub$INTENSITY), ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
-                        }
-                        
-                        if (censoredInt == "0") {
-                            subtempcount <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                            subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
-                        }
-                            
-                        numFea <- xtabs(~RUN, subtempcount)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                        
-                        numimpute <- xtabs(~RUN, subtempimpute)
-                
-                        sub.result <- data.frame(Protein=subtemp$PROTEIN,
-                                                 LogIntensities=subtemp$ABUNDANCE, 
-                                                 RUN=subtemp$RUN, 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF, 
-                                                 NumImputedFeature = as.vector(numimpute))
-                    
-                    } else {
-                        subtempcount <- subtemp
-                        
-                        numFea <- xtabs(~RUN, subtempcount)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                        
-                        sub.result <- data.frame(Protein=subtemp$PROTEIN,
-                                                 LogIntensities=subtemp$ABUNDANCE, 
-                                                 RUN=subtemp$RUN, 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF)
-                        
-                    }
-    
-                    # result <- rbind(result, sub.result)
-                }
-                
-                return(list(sub.result, predAbundance))
-                #return(list(sub.result))
-                
-            }  ## loop for proteins
-            close(pb)
-            #stopCluster(cl)  # foreach autocloses
+        for(i in 1: nlevels(data$PROTEIN)) {
             
-            ## Clean up the parallelized results
-            results.list <- list()
-            predAbundance.list <- list()
-            for(j in 1:length(MS_results[[1]])){
-              # deal with the "results" first
-              results.list[[j]] <- MS_results[[1]][[j]]
-              predAbundance.list[[j]] <- MS_results[[2]][[j]]
+            sub <- data[data$PROTEIN == levels(data$PROTEIN)[i], ]
+                                  
+            if (message.show) {
+                message(paste("Getting the summarization by Tukey's median polish per subplot for protein ",
+                              unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), ")"))
             }
-            result <- do.call(rbind, results.list)
-            predAbundance <- do.call(c, predAbundance.list)
-            #predAbundance <- predAbundance[-which(duplicated(predAbundance))] # remove duplicates
-            dataafterfit <- NULL
-            
-        } else {
-            ##################
-            ## no cluster
-            pb <- txtProgressBar(max = nlevels(data$PROTEIN), style = 3)
-            
-            for(i in 1: nlevels(data$PROTEIN)) {
-                
-                sub <- data[data$PROTEIN == levels(data$PROTEIN)[i], ]
-                                      
-                if (message.show) {
-                    message(paste("Getting the summarization by Tukey's median polish per subplot for protein ",
-                                  unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), ")"))
-                }
-                  
-                sub$FEATURE <- factor(sub$FEATURE)  
-                  
-                ### how to decide censored or not
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                              
-                            sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
-                            sub$cen <- ifelse(sub$censored, 0, 1)
-                              
-                        }
+              
+            sub$FEATURE <- factor(sub$FEATURE)  
+              
+            ### how to decide censored or not
+            if ( MBimpute ) {
+                if (!is.null(censoredInt)) {
+                    ## 1. censored 
+                    if (censoredInt == "0") {
                           
-                        ## 2. all censored missing
-                        if (censoredInt == "NA") {
-                              
-                            sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
-                            sub$cen <- ifelse(sub$censored, 0, 1)
-                              
-                        }
+                        sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
+                        sub$cen <- ifelse(sub$censored, 0, 1)
+                          
+                    }
+                      
+                    ## 2. all censored missing
+                    if (censoredInt == "NA") {
+                          
+                        sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
+                        sub$cen <- ifelse(sub$censored, 0, 1)
+                          
                     }
                 }
+            }
+              
+            ## if all measurements are NA,
+            if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
+                message(paste("Can't summarize for ", unique(sub$PROTEIN), 
+                              "(", i, " of ", length(unique(data$PROTEIN)),
+                              ") because all measurements are NAs."))
+                next()
+            }
+              
+            ## remove features which are completely NAs
+            if ( MBimpute ) {
+                if (!is.null(censoredInt)) {
+                    ## 1. censored 
+                    if (censoredInt == "0") {
+                        subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                          
+                    }
+                      
+                    ## 2. all censored missing
+                    if (censoredInt == "NA") {
+                          
+                        subtemp <- sub[!is.na(sub$ABUNDANCE), ]
+                          
+                    }  
+                      
+                } 
+            } else {
+                subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+            }
+              
+            countfeature <- xtabs(~FEATURE, subtemp)
+            namefeature <- names(countfeature)[countfeature == 0]
+              
+            if (length(namefeature) != 0) {
+                sub <- sub[-which(sub$FEATURE %in% namefeature), ]
                   
-                ## if all measurements are NA,
-                if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
+                if (nrow(sub) == 0) {
                     message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                  "(", i, " of ", length(unique(data$PROTEIN)),
-                                  ") because all measurements are NAs."))
-                    next()
-                }
-                  
-                ## remove features which are completely NAs
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                              
-                        }
-                          
-                        ## 2. all censored missing
-                        if (censoredInt == "NA") {
-                              
-                            subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                              
-                        }  
-                          
-                    } 
-                } else {
-                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                }
-                  
-                countfeature <- xtabs(~FEATURE, subtemp)
-                namefeature <- names(countfeature)[countfeature == 0]
-                  
-                if (length(namefeature) != 0) {
-                    sub <- sub[-which(sub$FEATURE %in% namefeature), ]
-                      
-                    if (nrow(sub) == 0) {
-                        message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                "(", i, " of ", length(unique(data$PROTEIN)), 
-                                ") because all measurements are NAs."))
-                        next()
-                          
-                    } else {
-                        sub$FEATURE <- factor(sub$FEATURE)
-                    }
-                }
-                  
-                ## remove features which have only 1 measurement.
-                namefeature1 <- names(countfeature)[countfeature == 1]
-                  
-                if (length(namefeature1) != 0) {
-                    sub <- sub[-which(sub$FEATURE %in% namefeature1), ]
-                      
-                    if (nrow(sub) == 0) {
-                        message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                                "(", i, " of ", length(unique(data$PROTEIN)), 
-                                ") because features have only one measurement across MS runs."))
-                        next()
-
-                    } else {
-                        sub$FEATURE <- factor(sub$FEATURE)
-                    }
-                }
-                  
-                ## check one more time
-                ## if all measurements are NA,
-                if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
-                    message(paste("After removing features which has only 1 measurement, Can't summarize for ",
-                            unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), 
+                            "(", i, " of ", length(unique(data$PROTEIN)), 
                             ") because all measurements are NAs."))
                     next()
-                }
-                  
-                ## remove run which has no measurement at all 
-                ## remove features which are completely NAs
-                if ( MBimpute ) {
-                    if (!is.null(censoredInt)) {
-                        ## 1. censored 
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                        }
-                          
-                        ## 2. all censored missing
-                        if (censoredInt == "NA") {
-                            subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                        }  
-                    } 
+                      
                 } else {
-                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                    sub$FEATURE <- factor(sub$FEATURE)
                 }
+            }
+              
+            ## remove features which have only 1 measurement.
+            namefeature1 <- names(countfeature)[countfeature == 1]
+              
+            if (length(namefeature1) != 0) {
+                sub <- sub[-which(sub$FEATURE %in% namefeature1), ]
                   
-                count <- aggregate(ABUNDANCE ~ RUN, data=subtemp, length)
-                norun <- setdiff(unique(data$RUN), count$RUN)
-                  
-                if (length(norun) != 0 & length(intersect(norun, as.character(unique(sub$RUN))))) { 
-                    # removed NA rows already, if there is no overlapped run, error
-                    sub <- sub[-which(sub$RUN %in% norun), ]
-                    sub$RUN <- factor(sub$RUN)
+                if (nrow(sub) == 0) {
+                    message(paste("Can't summarize for ", unique(sub$PROTEIN), 
+                            "(", i, " of ", length(unique(data$PROTEIN)), 
+                            ") because features have only one measurement across MS runs."))
+                    next()
+
+                } else {
+                    sub$FEATURE <- factor(sub$FEATURE)
                 }
-                  
-                if (remove50missing) {
-                    # count # feature per run
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtemp <- sub[!is.na(sub$INTENSITY), ]
-                        }
-                          
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                        }
+            }
+              
+            ## check one more time
+            ## if all measurements are NA,
+            if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
+                message(paste("After removing features which has only 1 measurement, Can't summarize for ",
+                        unique(sub$PROTEIN), "(", i," of ", length(unique(data$PROTEIN)), 
+                        ") because all measurements are NAs."))
+                next()
+            }
+              
+            ## remove run which has no measurement at all 
+            ## remove features which are completely NAs
+            if ( MBimpute ) {
+                if (!is.null(censoredInt)) {
+                    ## 1. censored 
+                    if (censoredInt == "0") {
+                        subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
                     }
                       
-                    numFea <- xtabs(~RUN, subtemp) ## RUN or run.label?
-                    numFea <- numFea/length(unique(subtemp$FEATURE))
-                    numFea <- numFea <= 0.5
-                    removerunid <- names(numFea)[numFea]
-                      
-                    ## if all measurements are NA,
-                    if (length(removerunid)==length(numFea)) {
-                        message(paste("Can't summarize for ",unique(sub$PROTEIN), 
-                                "(", i, " of ", length(unique(data$PROTEIN)),
-                                ") because all runs have more than 50% NAs and are removed with the option, remove50missing=TRUE."))
-                        next()
+                    ## 2. all censored missing
+                    if (censoredInt == "NA") {
+                        subtemp <- sub[!is.na(sub$ABUNDANCE), ]
+                    }  
+                } 
+            } else {
+                subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+            }
+              
+            count <- aggregate(ABUNDANCE ~ RUN, data=subtemp, length)
+            norun <- setdiff(unique(data$RUN), count$RUN)
+              
+            if (length(norun) != 0 & length(intersect(norun, as.character(unique(sub$RUN))))) { 
+                # removed NA rows already, if there is no overlapped run, error
+                sub <- sub[-which(sub$RUN %in% norun), ]
+                sub$RUN <- factor(sub$RUN)
+            }
+              
+            if (remove50missing) {
+                # count # feature per run
+                if (!is.null(censoredInt)) {
+                    if (censoredInt == "NA") {
+                        subtemp <- sub[!is.na(sub$INTENSITY), ]
                     }
                       
+                    if (censoredInt == "0") {
+                        subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
+                    }
                 }
                   
-                ## check whether we need to impute or not.
-                if (sum(sub$cen == 0) > 0) {
-                      
-                    ## 2. put minimum in feature level to NA
-                    if (cutoffCensored == "minFeature") {
-                        if (censoredInt == "NA") {
-                            cut <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                              
-                            ## remove runs which has more than 50% missing values
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-                              
-                            for(j in 1:length(unique(cut$FEATURE))) {
-                                sub[is.na(sub$ABUNDANCE) & sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                          
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                            cut <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                              
-                            ## remove runs which has more than 50% missing values
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-                            
-                            for(j in 1:length(unique(cut$FEATURE))) {
-                                sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0  & 
-                                        sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                    }
-                      
-                    ## 3. put minimum in RUN to NA
-                    if (cutoffCensored == "minRun") {
+                numFea <- xtabs(~RUN, subtemp) ## RUN or run.label?
+                numFea <- numFea/length(unique(subtemp$FEATURE))
+                numFea <- numFea <= 0.5
+                removerunid <- names(numFea)[numFea]
+                  
+                ## if all measurements are NA,
+                if (length(removerunid)==length(numFea)) {
+                    message(paste("Can't summarize for ",unique(sub$PROTEIN), 
+                            "(", i, " of ", length(unique(data$PROTEIN)),
+                            ") because all runs have more than 50% NAs and are removed with the option, remove50missing=TRUE."))
+                    next()
+                }
+                  
+            }
+              
+            ## check whether we need to impute or not.
+            if (sum(sub$cen == 0) > 0) {
+                  
+                ## 2. put minimum in feature level to NA
+                if (cutoffCensored == "minFeature") {
+                    if (censoredInt == "NA") {
+                        cut <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
+                        ## cutoff for each feature is little less than minimum abundance in a run.
+                        cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
                           
                         ## remove runs which has more than 50% missing values
                         if (remove50missing) {
@@ -1959,281 +1395,317 @@ resultsAsLists <- function(x, ...) {
                             }
                         }
                           
-                        if (censoredInt == "NA") {
-                            cut <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
-                            ## cutoff for each Run is little less than minimum abundance in a run.
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                              
-                            for(j in 1:length(unique(cut$RUN))) {
-                                sub[is.na(sub$ABUNDANCE) & 
-                                        sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
-                        }
-                          
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                            cut <- aggregate(ABUNDANCE ~ RUN, data=subtemptemp, FUN=min)
-                            cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
-                              
-                            for(j in 1:length(unique(cut$RUN))) {
-                                sub[!is.na(sub$ABUNDANCE) & 
-                                        sub$ABUNDANCE == 0 & 
-                                        sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
-                            }
+                        for(j in 1:length(unique(cut$FEATURE))) {
+                            sub[is.na(sub$ABUNDANCE) & sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
                         }
                     }
                       
-                    ## 20150829 : 4. put minimum RUN and FEATURE
-                    if (cutoffCensored == "minFeatureNRun") {
-                        if (censoredInt == "NA") {
-                              
-                            ## cutoff for each feature is little less than minimum abundance in a run.
-                              
-                            cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
-                            cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
-                              
-                            ## remove runs which has more than 50% missing values
-                            ## before removing, need to contribute min feature calculation
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
-                            }
-                              
-                            ## cutoff for each Run is little less than minimum abundance in a run.
-                              
-                            cut.run <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
-                            cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
-                              
-                            if (length(unique(cut.fea$FEATURE)) > 1) {
-                                for(j in 1:length(unique(cut.fea$FEATURE))) {
-                                    for(k in 1:length(unique(cut.run$RUN))) {
-                                        # get smaller value for min Run and min Feature
-                                        finalcut <- min(cut.fea$ABUNDANCE[j],cut.run$ABUNDANCE[k])
-                                          
-                                        sub[is.na(sub$ABUNDANCE) & 
-                                                sub$FEATURE == cut.fea$FEATURE[j] & 
-                                                sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
-                                    }
-                                }
-                            }
-                            # if single feature, not impute
-                        }
+                    if (censoredInt == "0") {
+                        subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                        cut <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
+                        ## cutoff for each feature is little less than minimum abundance in a run.
+                        cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
                           
-                        if (censoredInt == "0") {
-                            subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                              
-                            cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
-                            cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
-                              
-                            ## remove runs which has more than 50% missing values
-                            ## before removing, need to contribute min feature calculation
-                            if (remove50missing) {
-                                if (length(removerunid) != 0) {
-                                    sub <- sub[-which(sub$RUN %in% removerunid), ]
-                                    sub$RUN <- factor(sub$RUN)
-                                }
+                        ## remove runs which has more than 50% missing values
+                        if (remove50missing) {
+                            if (length(removerunid) != 0) {
+                                sub <- sub[-which(sub$RUN %in% removerunid), ]
+                                sub$RUN <- factor(sub$RUN)
                             }
-                              
-                            cut.run <- aggregate(ABUNDANCE~RUN, data=subtemptemp, FUN=min)
-                            cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
-                              
-                            if (length(unique(cut.fea$FEATURE)) > 1) {
-                                for(j in 1:length(unique(cut.fea$FEATURE))) {
-                                    for(k in 1:length(unique(cut.run$RUN))) {
-                                        # get smaller value for min Run and min Feature
-                                        finalcut <- min(cut.fea$ABUNDANCE[j], cut.run$ABUNDANCE[k])
-                                          
-                                        sub[!is.na(sub$ABUNDANCE) & 
-                                                sub$ABUNDANCE == 0 & 
-                                                sub$FEATURE == cut.fea$FEATURE[j] & 
-                                                sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
-                                    }
-                                }
-                            } else { # single feature
-                                  
-                                sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0, "ABUNDANCE"] <- cut.fea$ABUNDANCE
-                                  
-                            }
+                        }
+                        
+                        for(j in 1:length(unique(cut$FEATURE))) {
+                            sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0  & 
+                                    sub$FEATURE == cut$FEATURE[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
+                        }
+                    }
+                }
+                  
+                ## 3. put minimum in RUN to NA
+                if (cutoffCensored == "minRun") {
+                      
+                    ## remove runs which has more than 50% missing values
+                    if (remove50missing) {
+                        if (length(removerunid) != 0) {
+                            sub <- sub[-which(sub$RUN %in% removerunid), ]
+                            sub$RUN <- factor(sub$RUN)
                         }
                     }
                       
-                    if (MBimpute) {
+                    if (censoredInt == "NA") {
+                        cut <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
+                        ## cutoff for each Run is little less than minimum abundance in a run.
+                        cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
                           
-                        if (nrow(sub[sub$cen == 0, ]) > 0) {
-                            ## impute by survival model
-                            subtemp <- sub[!is.na(sub$ABUNDANCE),]
-                            countdf <- nrow(subtemp) < (length(unique(subtemp$FEATURE))+length(unique(subtemp$RUN))-1)
+                        for(j in 1:length(unique(cut$RUN))) {
+                            sub[is.na(sub$ABUNDANCE) & 
+                                    sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
+                        }
+                    }
+                      
+                    if (censoredInt == "0") {
+                        subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                        cut <- aggregate(ABUNDANCE ~ RUN, data=subtemptemp, FUN=min)
+                        cut$ABUNDANCE <- 0.99*cut$ABUNDANCE
+                          
+                        for(j in 1:length(unique(cut$RUN))) {
+                            sub[!is.na(sub$ABUNDANCE) & 
+                                    sub$ABUNDANCE == 0 & 
+                                    sub$RUN == cut$RUN[j], "ABUNDANCE"] <- cut$ABUNDANCE[j]
+                        }
+                    }
+                }
+                  
+                ## 20150829 : 4. put minimum RUN and FEATURE
+                if (cutoffCensored == "minFeatureNRun") {
+                    if (censoredInt == "NA") {
+                          
+                        ## cutoff for each feature is little less than minimum abundance in a run.
+                          
+                        cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=sub, function(x) min(x, na.rm=TRUE))
+                        cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
+                          
+                        ## remove runs which has more than 50% missing values
+                        ## before removing, need to contribute min feature calculation
+                        if (remove50missing) {
+                            if (length(removerunid) != 0) {
+                                sub <- sub[-which(sub$RUN %in% removerunid), ]
+                                sub$RUN <- factor(sub$RUN)
+                            }
+                        }
+                          
+                        ## cutoff for each Run is little less than minimum abundance in a run.
+                          
+                        cut.run <- aggregate(ABUNDANCE ~ RUN, data=sub, function(x) min(x, na.rm=TRUE))
+                        cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
+                          
+                        if (length(unique(cut.fea$FEATURE)) > 1) {
+                            for(j in 1:length(unique(cut.fea$FEATURE))) {
+                                for(k in 1:length(unique(cut.run$RUN))) {
+                                    # get smaller value for min Run and min Feature
+                                    finalcut <- min(cut.fea$ABUNDANCE[j],cut.run$ABUNDANCE[k])
+                                      
+                                    sub[is.na(sub$ABUNDANCE) & 
+                                            sub$FEATURE == cut.fea$FEATURE[j] & 
+                                            sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
+                                }
+                            }
+                        }
+                        # if single feature, not impute
+                    }
+                      
+                    if (censoredInt == "0") {
+                        subtemptemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                          
+                        cut.fea <- aggregate(ABUNDANCE ~ FEATURE, data=subtemptemp, FUN=min)
+                        cut.fea$ABUNDANCE <- 0.99*cut.fea$ABUNDANCE
+                          
+                        ## remove runs which has more than 50% missing values
+                        ## before removing, need to contribute min feature calculation
+                        if (remove50missing) {
+                            if (length(removerunid) != 0) {
+                                sub <- sub[-which(sub$RUN %in% removerunid), ]
+                                sub$RUN <- factor(sub$RUN)
+                            }
+                        }
+                          
+                        cut.run <- aggregate(ABUNDANCE~RUN, data=subtemptemp, FUN=min)
+                        cut.run$ABUNDANCE <- 0.99*cut.run$ABUNDANCE
+                          
+                        if (length(unique(cut.fea$FEATURE)) > 1) {
+                            for(j in 1:length(unique(cut.fea$FEATURE))) {
+                                for(k in 1:length(unique(cut.run$RUN))) {
+                                    # get smaller value for min Run and min Feature
+                                    finalcut <- min(cut.fea$ABUNDANCE[j], cut.run$ABUNDANCE[k])
+                                      
+                                    sub[!is.na(sub$ABUNDANCE) & 
+                                            sub$ABUNDANCE == 0 & 
+                                            sub$FEATURE == cut.fea$FEATURE[j] & 
+                                            sub$RUN == cut.run$RUN[k], "ABUNDANCE"] <- finalcut
+                                }
+                            }
+                        } else { # single feature
                               
-                            set.seed(100)
-                            ### fit the model
-                            if (length(unique(sub$FEATURE)) == 1) {
+                            sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0, "ABUNDANCE"] <- cut.fea$ABUNDANCE
+                              
+                        }
+                    }
+                }
+                  
+                if (MBimpute) {
+                      
+                    if (nrow(sub[sub$cen == 0, ]) > 0) {
+                        ## impute by survival model
+                        subtemp <- sub[!is.na(sub$ABUNDANCE),]
+                        countdf <- nrow(subtemp) < (length(unique(subtemp$FEATURE))+length(unique(subtemp$RUN))-1)
+                          
+                        set.seed(100)
+                        ### fit the model
+                        if (length(unique(sub$FEATURE)) == 1) {
+                            fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
+                                                           data=sub, dist='gaussian')
+                        } else {
+                            if (countdf) {
                                 fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
-                                                               data=sub, dist='gaussian')
+                                                             data=sub, dist='gaussian')
                             } else {
-                                if (countdf) {
-                                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
-                                                                 data=sub, dist='gaussian')
-                                } else {
-                                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ FEATURE+RUN, 
-                                                                   data=sub, dist='gaussian')
-                                }
+                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ FEATURE+RUN, 
+                                                               data=sub, dist='gaussian')
                             }
-                              
-                            # get predicted value from survival
-                            sub <- data.frame(sub, pred=predict(fittest, newdata=sub, type="response"))
-                              
-                            # the replace censored value with predicted value
-                            sub[sub$cen == 0, "ABUNDANCE"] <- sub[sub$cen == 0, "pred"] 
-                              
-                            # save predicted value
-                              # predAbundance <- c(predAbundance,predict(fittest, newdata=sub, type="response"))
-                              #predAbundance <- c(predict(fittest, newdata=sub, type="response"))
                         }
-                    }   
+                          
+                        # get predicted value from survival
+                        sub <- data.frame(sub, pred=predict(fittest, newdata=sub, type="response"))
+                          
+                        # the replace censored value with predicted value
+                        sub[sub$cen == 0, "ABUNDANCE"] <- sub[sub$cen == 0, "pred"] 
+                          
+                        # save predicted value
+                          # predAbundance <- c(predAbundance,predict(fittest, newdata=sub, type="response"))
+                          #predAbundance <- c(predict(fittest, newdata=sub, type="response"))
+                    }
+                }   
+            }
+              
+            ## then, finally remove NA in abundance
+            sub <- sub[!is.na(sub$ABUNDANCE), ]
+              
+            if (nlevels(sub$FEATURE) > 1) { ## for more than 1 features
+                  
+                data_w <- reshape2::dcast(RUN ~ FEATURE, data=sub, value.var='ABUNDANCE', keep=TRUE)
+                rownames(data_w) <- data_w$RUN
+                data_w <- data_w[, -1]
+                data_w[data_w == 1] <- NA
+                  
+                if (!original_scale) {
+                      
+                    meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
+                    tmpresult <- meddata$overall + meddata$row
+                      
+                      ## if fractionated sample, need to get per sample run
+                      ## ?? if there are technical replicates, how to match sample and MS run for different fractionation??
+                      
+                      #if( length(unique(sub$METHOD)) > 1 ) {
+                      #  runinfo <- unique(sub[, c("GROUP_ORIGINAL", "SUBJECT_ORIGINAL", "RUN", "METHOD")])
+                      #  runinfo$uniquesub <- paste(runinfo$GROUP_ORIGINAL, runinfo$SUBJECT_ORIGINAL, sep="_")
+                      #}
+                      
+                } else { # original_scale
+                    data_w <- 2^(data_w)
+                     
+                    meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
+                    tmpresult <- meddata$overall + meddata$row
+                      
+                    tmpresult <- log2(tmpresult)
                 }
                   
-                ## then, finally remove NA in abundance
-                sub <- sub[!is.na(sub$ABUNDANCE), ]
-                  
-                if (nlevels(sub$FEATURE) > 1) { ## for more than 1 features
-                      
-                    data_w <- reshape2::dcast(RUN ~ FEATURE, data=sub, value.var='ABUNDANCE', keep=TRUE)
-                    rownames(data_w) <- data_w$RUN
-                    data_w <- data_w[, -1]
-                    data_w[data_w == 1] <- NA
-                      
-                    if (!original_scale) {
-                          
-                        meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
-                        tmpresult <- meddata$overall + meddata$row
-                          
-                          ## if fractionated sample, need to get per sample run
-                          ## ?? if there are technical replicates, how to match sample and MS run for different fractionation??
-                          
-                          #if( length(unique(sub$METHOD)) > 1 ) {
-                          #  runinfo <- unique(sub[, c("GROUP_ORIGINAL", "SUBJECT_ORIGINAL", "RUN", "METHOD")])
-                          #  runinfo$uniquesub <- paste(runinfo$GROUP_ORIGINAL, runinfo$SUBJECT_ORIGINAL, sep="_")
-                          #}
-                          
-                    } else { # original_scale
-                        data_w <- 2^(data_w)
-                         
-                        meddata  <-  medpolish(data_w,na.rm=TRUE, trace.iter = FALSE)
-                        tmpresult <- meddata$overall + meddata$row
-                          
-                        tmpresult <- log2(tmpresult)
-                    }
-                      
-                    # count # feature per run
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtemp <- sub[!is.na(sub$INTENSITY), ]
-                            subtempimpute <- sub[is.na(sub$INTENSITY), ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
-                        }
-                          
-                        if (censoredInt == "0") {
-                            subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                            subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
-                        }
-                          
-                        subtemp$RUN <- factor(subtemp$RUN, levels = rownames(data_w))
-                        numFea <- xtabs(~RUN, subtemp)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                          
-                        subtempimpute$RUN <- factor(subtempimpute$RUN, levels = rownames(data_w))
-                        numimpute <- xtabs(~RUN, subtempimpute)
-                          
-                        sub.result <- data.frame(Protein = unique(sub$PROTEIN), 
-                                                 LogIntensities = tmpresult, 
-                                                 RUN = names(tmpresult), 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage = as.vector(numFeaPercentage), 
-                                                 more50missing = numFeaTF, 
-                                                 NumImputedFeature = as.vector(numimpute))
-                          
-                    } else {
+                # count # feature per run
+                if (!is.null(censoredInt)) {
+                    if (censoredInt == "NA") {
                         subtemp <- sub[!is.na(sub$INTENSITY), ]
-                          
-                        subtemp$RUN <- factor(subtemp$RUN, levels =rownames(data_w))
-                        numFea <- xtabs(~RUN, subtemp)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                          
-                        sub.result <- data.frame(Protein=unique(sub$PROTEIN), 
-                                                 LogIntensities=tmpresult, 
-                                                 RUN=names(tmpresult), 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF)
-                          
+                        subtempimpute <- sub[is.na(sub$INTENSITY), ]
+                        subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
                     }
                       
-                    result <- rbind(result, sub.result)
-                } else { ## single feature
-                      
-                    ## single feature, use original values
-                      
-                    subtemp <- sub[!is.na(sub$ABUNDANCE),]
-                      
-                    if (!is.null(censoredInt)) {
-                        if (censoredInt == "NA") {
-                            subtempcount <- sub[!is.na(sub$INTENSITY), ]
-                            subtempimpute <- sub[is.na(sub$INTENSITY), ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
-                        }
-                          
-                        if (censoredInt == "0") {
-                            subtempcount <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
-                            subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
-                            subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
-                        }
-                          
-                        numFea <- xtabs(~RUN, subtempcount)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                          
-                        numimpute <- xtabs(~RUN, subtempimpute)
-                          
-                        sub.result <- data.frame(Protein=subtemp$PROTEIN,
-                                                 LogIntensities=subtemp$ABUNDANCE, 
-                                                 RUN=subtemp$RUN, 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF, 
-                                                 NumImputedFeature = as.vector(numimpute))
-                          
-                    } else {
-                        subtempcount <- subtemp
-                          
-                        numFea <- xtabs(~RUN, subtempcount)
-                        numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
-                        numFeaTF <- numFeaPercentage >= 0.5
-                          
-                        sub.result <- data.frame(Protein=subtemp$PROTEIN,
-                                                 LogIntensities=subtemp$ABUNDANCE, 
-                                                 RUN=subtemp$RUN, 
-                                                 NumMeasuredFeature = as.vector(numFea), 
-                                                 MissingPercentage=as.vector(numFeaPercentage), 
-                                                 more50missing=numFeaTF)
-                          
+                    if (censoredInt == "0") {
+                        subtemp <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
+                        subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
+                        subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
                     }
                       
-                    result <- rbind(result, sub.result)
+                    subtemp$RUN <- factor(subtemp$RUN, levels = rownames(data_w))
+                    numFea <- xtabs(~RUN, subtemp)
+                    numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
+                    numFeaTF <- numFeaPercentage >= 0.5
+                      
+                    subtempimpute$RUN <- factor(subtempimpute$RUN, levels = rownames(data_w))
+                    numimpute <- xtabs(~RUN, subtempimpute)
+                      
+                    sub.result <- data.frame(Protein = unique(sub$PROTEIN), 
+                                             LogIntensities = tmpresult, 
+                                             RUN = names(tmpresult), 
+                                             NumMeasuredFeature = as.vector(numFea), 
+                                             MissingPercentage = as.vector(numFeaPercentage), 
+                                             more50missing = numFeaTF, 
+                                             NumImputedFeature = as.vector(numimpute))
+                      
+                } else {
+                    subtemp <- sub[!is.na(sub$INTENSITY), ]
+                      
+                    subtemp$RUN <- factor(subtemp$RUN, levels =rownames(data_w))
+                    numFea <- xtabs(~RUN, subtemp)
+                    numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
+                    numFeaTF <- numFeaPercentage >= 0.5
+                      
+                    sub.result <- data.frame(Protein=unique(sub$PROTEIN), 
+                                             LogIntensities=tmpresult, 
+                                             RUN=names(tmpresult), 
+                                             NumMeasuredFeature = as.vector(numFea), 
+                                             MissingPercentage=as.vector(numFeaPercentage), 
+                                             more50missing=numFeaTF)
+                      
                 }
-                
-                ## progress
-                setTxtProgressBar(pb, i)
-                
-            }  ## loop for proteins
-            close(pb)
+                  
+                result <- rbind(result, sub.result)
+            } else { ## single feature
+                  
+                ## single feature, use original values
+                  
+                subtemp <- sub[!is.na(sub$ABUNDANCE),]
+                  
+                if (!is.null(censoredInt)) {
+                    if (censoredInt == "NA") {
+                        subtempcount <- sub[!is.na(sub$INTENSITY), ]
+                        subtempimpute <- sub[is.na(sub$INTENSITY), ]
+                        subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE), ]
+                    }
+                      
+                    if (censoredInt == "0") {
+                        subtempcount <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY != 0, ]
+                        subtempimpute <- sub[!is.na(sub$INTENSITY) & sub$INTENSITY == 0, ]
+                        subtempimpute <- subtempimpute[!is.na(subtempimpute$ABUNDANCE) & subtempimpute$ABUNDANCE != 0, ]
+                    }
+                      
+                    numFea <- xtabs(~RUN, subtempcount)
+                    numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
+                    numFeaTF <- numFeaPercentage >= 0.5
+                      
+                    numimpute <- xtabs(~RUN, subtempimpute)
+                      
+                    sub.result <- data.frame(Protein=subtemp$PROTEIN,
+                                             LogIntensities=subtemp$ABUNDANCE, 
+                                             RUN=subtemp$RUN, 
+                                             NumMeasuredFeature = as.vector(numFea), 
+                                             MissingPercentage=as.vector(numFeaPercentage), 
+                                             more50missing=numFeaTF, 
+                                             NumImputedFeature = as.vector(numimpute))
+                      
+                } else {
+                    subtempcount <- subtemp
+                      
+                    numFea <- xtabs(~RUN, subtempcount)
+                    numFeaPercentage <- 1 - numFea / length(unique(subtemp$FEATURE))
+                    numFeaTF <- numFeaPercentage >= 0.5
+                      
+                    sub.result <- data.frame(Protein=subtemp$PROTEIN,
+                                             LogIntensities=subtemp$ABUNDANCE, 
+                                             RUN=subtemp$RUN, 
+                                             NumMeasuredFeature = as.vector(numFea), 
+                                             MissingPercentage=as.vector(numFeaPercentage), 
+                                             more50missing=numFeaTF)
+                      
+                }
+                  
+                result <- rbind(result, sub.result)
+            }
             
-            dataafterfit <- NULL
-        }
+            ## progress
+            setTxtProgressBar(pb, i)
+            
+        }  ## loop for proteins
+        close(pb)
+        
+        dataafterfit <- NULL
     }
         
     ###################################
