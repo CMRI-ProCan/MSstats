@@ -355,8 +355,7 @@
 
 ##########################################################################################
 
-.make.contrast.run.quantification <- function(fit, contrast.matrix, sub1, 
-                                              labeled) {
+.make.contrast.run.quantification <- function(fit, contrast.matrix, sub1) {
     
     if (class(fit) == "lm") {
         coef_name <- names(coef(fit))
@@ -387,31 +386,17 @@
     
     ## run: different with other quantification - first try
     temp <- coef_name[setdiff(grep("RUN", coef_name), grep(":", coef_name))]
-    if (!labeled) { 
-        ## label-free
-        if (length(temp) > 0) {
-            run_c <- contrast.matrix[-1]
-            names(run_c) <- temp
-        } else {
-			run_c <- NULL
-		}
-	} else { 
-	    ## label-based
-	    if (length(temp) > 0) {
-	        run_c <- rep(1 / nlevels(sub1$RUN), length(temp))
-	        names(run_c) <- temp
-	    } else {
-	        run_c <- NULL
-	    }
+    ## label-free
+    if (length(temp) > 0) {
+        run_c <- contrast.matrix[-1]
+        names(run_c) <- temp
+    } else {
+		run_c <- NULL
 	}
     
     ## ref
     temp <- coef_name[grep("ref", coef_name)]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            ref_levels <- levels(sub1$ref)
-			ref_c <- contrast.matrix[1:(length(ref_levels) - 1)]
-        }
         names(ref_c) <- temp
 	} else {
 	    ref_c <- NULL
@@ -431,12 +416,8 @@
     ## subject_nested
     temp <- coef_name[grep("SUBJECT_NESTED", coef_name)]
 	if (length(temp) > 0) {
-	    if (nlevels(sub1$LABEL) == 2) {
-	        subjectNested_c <- contrast.matrix
-	    } else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    subjectNested_c <- contrast.matrix[-1]
-		}
+	    ## label-free
+	    subjectNested_c <- contrast.matrix[-1]
 		names(subjectNested_c) <- temp
 	} else {
 	    subjectNested_c <- NULL
@@ -556,13 +537,8 @@
     if (length(temp) > 0) {
         tempSub <- unique(sub1[, c("FEATURE", "GROUP")])
         tempSub1 <- xtabs(~ GROUP + FEATURE, data=tempSub)
-        if (nlevels(sub1$LABEL) == 2) {
-            tempSub1 <- tempSub1[-1, ]
-            tempSub2 <- tempSub1[contrast.matrix == 1, ]
-        } else if (nlevels(sub1$LABEL) == 1) {
-            ## label-free
-            tempSub2 <- tempSub1[contrast.matrix == 1, ]
-        }
+        ## label-free
+        tempSub2 <- tempSub1[contrast.matrix == 1, ]
         feature_c <- as.numeric(tempSub2[-1]) / sum(tempSub2)
         names(feature_c) <- temp
     } else {
@@ -576,20 +552,15 @@
         temp2 <- as.vector(xtabs(~ temp1[, 1]))
         ## the base is alway be the first SUBJECT_NESTED
         ## (SUBJECT_NESTED0.0)
-        if (nlevels(sub1$LABEL) == 2) {
-            temp3 <- temp2
-            subjectNested_c <- rep(contrast.matrix / temp3, temp2)
-        } else if (nlevels(sub1$LABEL) == 1) {
-            ## label-free
-            temp3 <- temp2
-            if (length(temp2) == length(contrast.matrix)) {
-                ## this statement goes first, otherwise length of temp3 >1
-                temp3[1] <- temp2[1] + 1
-            } else {
-                temp3 <- c(1, temp3)
-            }
-            subjectNested_c <- rep(contrast.matrix / temp3, temp3)[-1]
+        ## label-free
+        temp3 <- temp2
+        if (length(temp2) == length(contrast.matrix)) {
+            ## this statement goes first, otherwise length of temp3 >1
+            temp3[1] <- temp2[1] + 1
+        } else {
+            temp3 <- c(1, temp3)
         }
+        subjectNested_c <- rep(contrast.matrix / temp3, temp3)[-1]
         names(subjectNested_c) <- temp
     } else {
         subjectNested_c <- NULL
@@ -622,13 +593,8 @@
 		tempSub2 <- tempSub1[-1]
 		temp1 <- t(matrix(unlist(strsplit(as.character(temp), "\\:")), nrow=2))
 		temp2 <- as.vector(xtabs(~ temp1[, 2]))	
-		if (nlevels(sub1$LABEL) == 2) {
-		    subjectOrigGroup_c <- 
-		        rep(as.numeric(contrast.matrix) / tempSub2, temp2)
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    subjectOrigGroup_c <- rep(contrast.matrix[-1] / tempSub2, temp2)
-		}
+	    ## label-free
+	    subjectOrigGroup_c <- rep(contrast.matrix[-1] / tempSub2, temp2)
 		names(subjectOrigGroup_c) <- temp
     } else {
         subjectOrigGroup_c <- NULL
@@ -637,12 +603,8 @@
     ## group
     temp <- coef_name[setdiff(grep("GROUP", coef_name), grep(":", coef_name))]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            group_c <- contrast.matrix
-        } else if (nlevels(sub1$LABEL) == 1) {
-            ## label-free
-            group_c <- contrast.matrix[-1]
-        }
+        ## label-free
+        group_c <- contrast.matrix[-1]
         names(group_c) <- temp
         
         ## if some group's coef is NA, need to remove
@@ -680,12 +642,8 @@
 		tempSub2 <- tempSub1[-1]
 		temp1 <- t(matrix(unlist(strsplit(as.character(temp), "\\:")), nrow=2))
 		temp2 <- as.vector(xtabs(~ temp1[, 2]))
-		if (nlevels(sub1$LABEL) == 2) {
-		    gf_c <- rep(as.numeric(contrast.matrix) / tempSub2, temp2)
-		} else if (nlevels(sub1$LABEL)==1) {
-		    ## label-free
-		    gf_c <- rep(contrast.matrix[-1] / tempSub2, temp2)
-		}
+	    ## label-free
+	    gf_c <- rep(contrast.matrix[-1] / tempSub2, temp2)
 		names(gf_c) <- temp
     } else {
         gf_c <- NULL
@@ -756,13 +714,8 @@
     if (length(temp) > 0) {
         tempSub <- unique(sub1[, c("FEATURE", "GROUP")])
         tempSub1 <- xtabs(~ GROUP + FEATURE, data=tempSub)
-        if (nlevels(sub1$LABEL) == 2) {
-            tempSub1 <- tempSub1[-1, ]
-            tempSub2 <- tempSub1[contrast.matrix == 1, ]
-        } else if (nlevels(sub1$LABEL) == 1) {
-            ## label-free
-            tempSub2 <- tempSub1[contrast.matrix == 1, ]
-        }
+        ## label-free
+        tempSub2 <- tempSub1[contrast.matrix == 1, ]
         feature_c <- as.numeric(tempSub2[-1]) / sum(tempSub2)
         names(feature_c) <- temp
     } else {
@@ -878,21 +831,11 @@
     #contrastGroup<-rep(0,nlevels(sub1$GROUP_ORIGINAL))
     #contrastGroup[as.numeric(contrastList[contrast.matrix==1,"GROUP_ORIGINAL"])]<-1
     
-    ## for label-based	
-	if (nlevels(sub1$LABEL) == 2) {
-	    ## remove GROUP==0
-	    contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL")])[-1, ]
-	    contrastList$GROUP <- factor(contrastList$GROUP)
-		contrastGroup <- rep(0, nlevels(sub1$GROUP) - 1)
-		contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
-		                                      "GROUP"])] <- 1
-	} else {
-	    ## for label-free
-	    contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL")])
-	    contrastGroup <- rep(0, nlevels(sub1$GROUP))
-	    contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
+    ## for label-free
+    contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL")])
+    contrastGroup <- rep(0, nlevels(sub1$GROUP))
+    contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
 	                                          "GROUP"])] <- 1
-	}
     
     ## intercept
     temp <- coef_name[grep("Intercept", coef_name)]
@@ -922,13 +865,8 @@
     if (length(temp) > 0) {
         tempSub <- unique(sub1[, c("FEATURE", "SUBJECT_NESTED")])
         tempSub1 <- xtabs(~ SUBJECT_NESTED + FEATURE, data=tempSub)
-        if (nlevels(sub1$LABEL) == 2) {
-            tempSub1 <- tempSub1[-1, ]
-			tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-			tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		}
+	    ## label-free
+		tempSub2 <- tempSub1[contrast.matrix == 1, ]
         feature_c <- as.numeric(tempSub2[-1]) / sum(tempSub2)
 		names(feature_c) <- temp
 	} else {
@@ -938,12 +876,8 @@
     ## subject_nested
     temp <- coef_name[grep("SUBJECT_NESTED", coef_name)]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            subjectNested_c <- contrast.matrix
-        } else if (nlevels(sub1$LABEL) == 1) {
-            ## label-free
-            subjectNested_c <- contrast.matrix[-1]
-		}
+        ## label-free
+        subjectNested_c <- contrast.matrix[-1]
 		names(subjectNested_c) <- temp
 	} else {
 	    subjectNested_c <- NULL
@@ -952,12 +886,8 @@
     ## group
     temp <- coef_name[setdiff(grep("GROUP", coef_name), grep(":", coef_name))]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            group_c <- contrastGroup
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    group_c <- contrastGroup[-1]
-		}
+	    ## label-free
+	    group_c <- contrastGroup[-1]
         names(group_c) <- temp
     } else {
         group_c <- NULL
@@ -986,12 +916,8 @@
 		tempSub2 <- tempSub1[-1]
 		temp1 <- t(matrix(unlist(strsplit(as.character(temp), "\\:")), nrow=2))
 		temp2 <- as.vector(xtabs(~ temp1[, 2]))
-		if (nlevels(sub1$LABEL) == 2) {
-		    gf_c <- rep(as.numeric(contrastGroup) / tempSub2, temp2)
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    gf_c <- rep(contrastGroup[-1] / tempSub2, temp2)
-		}
+	    ## label-free
+	    gf_c <- rep(contrastGroup[-1] / tempSub2, temp2)
 		names(gf_c) <- temp
     } else {
         gf_c <- NULL
@@ -1040,29 +966,11 @@
     #contrastGroup<-rep(0,nlevels(sub1$GROUP_ORIGINAL))
     #contrastGroup[as.numeric(contrastList[contrast.matrix==1,"GROUP_ORIGINAL"])]<-1
     
-    ## for label-based
-    if (nlevels(sub1$LABEL) == 2) {
-        contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL", 
-                                        "SUBJECT_NESTED")])
-        ## remove GROUP==0
-        contrastList <- contrastList[contrastList$GROUP != "0", ]
-        ## remove '0' group
-		contrastList$GROUP <- factor(contrastList$GROUP)
-		## remove '0' group
-		contrastList$SUBJECT_ORIGINAL <- factor(contrastList$SUBJECT_ORIGINAL)
-		contrastGroup <- rep(0, nlevels(sub1$GROUP) - 1)
-		contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
-		                                      "GROUP"])] <- 1
-		contrastSubjectOriginal <- rep(0, nlevels(sub1$SUBJECT_ORIGINAL))
-		contrastSubjectOriginal[as.numeric(
-		    contrastList[contrast.matrix == 1, "SUBJECT_ORIGINAL"])] <- 1
-    } else {
-        ## for label-free
-        contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL")])
-        contrastGroup <- rep(0, nlevels(sub1$GROUP))
-        contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
-                                              "GROUP"])] <- 1
-    }
+    ## for label-free
+    contrastList <- unique(sub1[, c("GROUP", "SUBJECT_ORIGINAL")])
+    contrastGroup <- rep(0, nlevels(sub1$GROUP))
+    contrastGroup[as.numeric(contrastList[contrast.matrix == 1, 
+                                          "GROUP"])] <- 1
     
     ## intercept
     temp <- coef_name[grep("Intercept", coef_name)]
@@ -1093,13 +1001,8 @@
     if (length(temp) > 0) {
         tempSub <- unique(sub1[, c("FEATURE", "SUBJECT_NESTED")])
 		tempSub1 <- xtabs(~ SUBJECT_NESTED + FEATURE, data=tempSub)
-		if (nlevels(sub1$LABEL) == 2) {
-		    tempSub1 <- tempSub1[-1, ]
-			tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-			tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		}
+	    ## label-free
+		tempSub2 <- tempSub1[contrast.matrix == 1, ]
 		feature_c <- as.numeric(tempSub2[-1]) / sum(tempSub2)
 		names(feature_c) <- temp
     } else {
@@ -1109,12 +1012,8 @@
     ## subject_nested
     temp <- coef_name[grep("SUBJECT_NESTED", coef_name)]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            subjectNested_c <- contrast.matrix
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    subjectNested_c <- contrast.matrix[-1]
-		}
+	    ## label-free
+	    subjectNested_c <- contrast.matrix[-1]
         names(subjectNested_c) <- temp
 	} else {
 	    subjectNested_c <- NULL
@@ -1133,12 +1032,8 @@
     ## group
     temp <- coef_name[setdiff(grep("GROUP", coef_name), grep(":", coef_name))]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            group_c <- contrastGroup
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    group_c <- contrastGroup[-1]
-		}
+	    ## label-free
+	    group_c <- contrastGroup[-1]
         names(group_c) <- temp
     } else {
         group_c <- NULL
@@ -1170,12 +1065,8 @@
 		tempSub2 <- tempSub1[-1]
 		temp1 <- t(matrix(unlist(strsplit(as.character(temp), "\\:")), nrow=2))
 		temp2 <- as.vector(xtabs(~ temp1[, 2]))
-		if (nlevels(sub1$LABEL) == 2) {
-		    gf_c <- rep(as.numeric(contrastGroup) / tempSub2, temp2)
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    # label-free
-			gf_c <- rep(contrastGroup[-1] / tempSub2, temp2)
-		}
+	    # label-free
+		gf_c <- rep(contrastGroup[-1] / tempSub2, temp2)
 		names(gf_c) <- temp
     } else {
         gf_c <- NULL
@@ -1249,13 +1140,8 @@
 	if (length(temp) > 0) {
 	    tempSub <- unique(sub1[, c("FEATURE", "SUBJECT_NESTED")])
 	    tempSub1 <- xtabs(~ SUBJECT_NESTED + FEATURE, data=tempSub)
-	    if (nlevels(sub1$LABEL) == 2) {
-	        tempSub1 <- tempSub1[-1, ]
-			tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    tempSub2 <- tempSub1[contrast.matrix == 1, ]
-		}
+	    ## label-free
+	    tempSub2 <- tempSub1[contrast.matrix == 1, ]
 	    feature_c <- as.numeric(tempSub2[-1]) / sum(tempSub2)
 		names(feature_c) <- temp
 	} else {
@@ -1593,7 +1479,7 @@
 ##########################################################################################
 
 .make.contrast.run.quantification.Survival <- function(fit, contrast.matrix, 
-                                                       sub1, labeled) {
+                                                       sub1) {
     
     coef_name <- names(fit$coefficients)
     
@@ -1619,24 +1505,13 @@
     }
     
     ## run: different with other quantification - first try
-    if (!labeled) {
-        ## label-free
-        temp <- coef_name[setdiff(grep("RUN", coef_name), grep(":", coef_name))]
-        if (length(temp) > 0) {
-            run_c <- contrast.matrix[-1]
-            names(run_c) <- temp
-        } else {
-            run_c <- NULL
-        }
+    ## label-free
+    temp <- coef_name[setdiff(grep("RUN", coef_name), grep(":", coef_name))]
+    if (length(temp) > 0) {
+        run_c <- contrast.matrix[-1]
+        names(run_c) <- temp
     } else {
-        ## label-based
-        temp <- coef_name[setdiff(grep("RUN", coef_name), grep(":", coef_name))]
-        if (length(temp) > 0) {
-            run_c <- rep(1 / nlevels(sub1$RUN), length(temp))
-            names(run_c) <- temp
-        } else {
-            run_c <- NULL
-        }
+        run_c <- NULL
     }
     
     ## ref
@@ -1663,12 +1538,8 @@
     ## subject_nested
     temp <- coef_name[grep("SUBJECT_NESTED", coef_name)]
     if (length(temp) > 0) {
-        if (nlevels(sub1$LABEL) == 2) {
-            subjectNested_c <- contrast.matrix
-		} else if (nlevels(sub1$LABEL) == 1) {
-		    ## label-free
-		    subjectNested_c <- contrast.matrix[-1]
-		}
+	    ## label-free
+	    subjectNested_c <- contrast.matrix[-1]
         names(subjectNested_c) <- temp
     } else {
         subjectNested_c <- NULL
