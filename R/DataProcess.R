@@ -239,21 +239,9 @@ dataProcess  <-  function(raw,
     ## make letters case-insensitive
     colnames(raw) <- toupper(colnames(raw))
     
-    if( any(is.element(colnames(raw), 'FRACTION')) ) {
-        fraction <- 'FRACTION'
-    } else {
-        fraction <- NULL
-    }
-    
-    if( any(is.element(colnames(raw), 'TECHREPLICATE')) ) {
-        tech.rep <- 'TECHREPLICATE'
-    } else {
-        tech.rep <- NULL
-    }
-    
     require.col <- c("PROTEINNAME", "PEPTIDESEQUENCE", "PRECURSORCHARGE", 
                      "FRAGMENTION", "PRODUCTCHARGE", 
-                     "CONDITION", "BIOREPLICATE", "RUN", "INTENSITY", fraction, tech.rep)
+                     "CONDITION", "BIOREPLICATE", "RUN", "INTENSITY")
     raw.temp <- raw[, require.col]
   
     ## before remove, get PeptideSequence and combination of PeptideSequence and precursorcharge for global standard normalization
@@ -267,39 +255,14 @@ dataProcess  <-  function(raw,
                            PEPTIDE=paste(raw.temp$PEPTIDESEQUENCE, raw.temp$PRECURSORCHARGE, sep="_"), 
                            TRANSITION=paste(raw.temp$FRAGMENTION, raw.temp$PRODUCTCHARGE, sep="_"))
   
-    if( any(is.element(colnames(raw.temp), 'FRACTION')) ) {
-        fraction <- 'FRACTION'
-    } else {
-        fraction <- NULL
-    }
-    
-    if( any(is.element(colnames(raw.temp), 'TECHREPLICATE')) ) {
-        tech.rep <- 'TECHREPLICATE'
-    } else {
-        tech.rep <- NULL
-    }
-    
     require.col <- c("PROTEINNAME", "PEPTIDE", "TRANSITION", 
-                     "CONDITION", "BIOREPLICATE", "RUN",  "INTENSITY", 
-                     fraction, tech.rep)
+                     "CONDITION", "BIOREPLICATE", "RUN",  "INTENSITY")
     
     raw.temp <- raw.temp[, require.col]
   
-    if( ncol(raw.temp) == 10 & 
-        any(is.element(colnames(raw.temp), 'FRACTION')) & 
-        any(is.element(colnames(raw.temp), 'TECHREPLICATE'))) {
-        colnames(raw.temp) <- c("Protein", "Peptide", "Transition", 
-                                "Condition", "Sample", "Run", "Intensity", 'Fraction', 'TechReplicate')
-    } else if( ncol(raw.temp) == 9 &
-               any(is.element(colnames(raw.temp), 'FRACTION')) ) {
-        colnames(raw.temp) <- c("Protein", "Peptide", "Transition", 
-                                "Condition", "Sample", "Run", "Intensity", 'Fraction')
-    } else {
-        colnames(raw.temp) <- c("Protein", "Peptide", "Transition", 
-                                "Condition", "Sample", "Run", "Intensity")
-    }
-
-  
+    colnames(raw.temp) <- c("Protein", "Peptide", "Transition", 
+                            "Condition", "Sample", "Run", "Intensity")
+ 
     ## create work data for quant analysis
     ## -----------------------------------
     raw.temp <- raw.temp[!is.na(raw.temp$Protein), ]
@@ -323,14 +286,6 @@ dataProcess  <-  function(raw,
     work[, "SUBJECT"] <- work[, "SUBJECT_ORIGINAL"]
 
     work <- data.frame(work, SUBJECT_NESTED=paste(work$GROUP, work$SUBJECT, sep="."))
-  
-    if( any(is.element(colnames(raw.temp), 'Fraction')) ) {
-        work <- data.frame(work, FRACTION = raw.temp$Fraction)
-    }
-    
-    if( any(is.element(colnames(raw.temp), 'TechReplicate')) ) {
-        work <- data.frame(work, TECHREPLICATE = raw.temp$TechReplicate)
-    }
     
     processout <- rbind(processout, c("New input format : made new columns for analysis - okay"))
     write.table(processout, file=finalfile, row.names=FALSE)
@@ -375,7 +330,6 @@ dataProcess  <-  function(raw,
     write.table(processout, file=finalfile, row.names=FALSE)
    
     work$RUN <- factor(work$RUN)
-    work$FRACTION <- 1
 
     ## check messingness for multirun 
   
@@ -427,7 +381,7 @@ dataProcess  <-  function(raw,
             ## get subject, group information for this run
             nameID <- unique(work[work$RUN==runID[j], c("SUBJECT_ORIGINAL","GROUP_ORIGINAL",
                                                             "GROUP","SUBJECT","SUBJECT_NESTED",
-                                                            "RUN","FRACTION")])
+                                                            "RUN")])
   
             ## get feature ID
             featureID <- structure[,colnames(structure)==runID[j]]
@@ -465,8 +419,7 @@ dataProcess  <-  function(raw,
                                               SUBJECT=nameID$SUBJECT, 
                                               SUBJECT_NESTED=nameID$SUBJECT_NESTED, 
                                               INTENSITY=NA, 
-                                              ABUNDANCE=NA, 
-                                              FRACTION=nameID$FRACTION) 
+                                              ABUNDANCE=NA) 
     
                 ## merge with tempary space, missingwork
                 missingwork <- rbind(missingwork, tempmissingwork)
@@ -515,7 +468,7 @@ dataProcess  <-  function(raw,
   
             nameID <- unique(work[work$RUN == runID[j], c("SUBJECT_ORIGINAL", "GROUP_ORIGINAL", 
                                                           "GROUP","SUBJECT", "SUBJECT_NESTED", 
-                                                          "RUN", "FRACTION")])
+                                                          "RUN")])
   
             featureID <- structure[, colnames(structure)==runID[j]]
             finalfeatureID <- featureID[!is.na(featureID) & featureID > 1]
@@ -593,27 +546,17 @@ dataProcess  <-  function(raw,
         ## Constant normalization by endogenous per method
   
         ## [MC : use median of medians]
-        median.run.method  <-  aggregate(ABUNDANCE ~ RUN + FRACTION, data = work, median, na.rm = TRUE)
-        median.method  <-  tapply(median.run.method$ABUNDANCE, median.run.method$FRACTION, median, na.rm = TRUE)
+        median.run.method  <-  aggregate(ABUNDANCE ~ RUN , data = work, median, na.rm = TRUE)
   
-        nmethod <- unique(work$FRACTION)
-  
-        for(j in 1:length(nmethod)) {
-            namerun <- unique(work[work$FRACTION == nmethod[j], "RUN"])
-    
-            for (i in 1:length(namerun)) {
-                ## ABUNDANCE is normalized
-              namerun.idx <- which(work$RUN == namerun[i])
-              work[namerun.idx, "ABUNDANCE"] <- work[namerun.idx, "ABUNDANCE"] - median.run.method[median.run.method$RUN == namerun[i], "ABUNDANCE"] + median.method[j]
-            }
+        namerun <- unique(work[, "RUN"])
+
+        for (i in 1:length(namerun)) {
+            ## ABUNDANCE is normalized
+          namerun.idx <- which(work$RUN == namerun[i])
+          work[namerun.idx, "ABUNDANCE"] <- work[namerun.idx, "ABUNDANCE"] - median.run.method[median.run.method$RUN == namerun[i], "ABUNDANCE"]
         }
     
-        if(length(nmethod) == 1) {
-            processout <- rbind(processout, c("Normalization : Constant normalization (equalize medians) - okay"))
-        } else if (length(nmethod) >1) {
-            ## if there are fractions, report addition information.
-            processout <- rbind(processout, c("Normalization : Constant normalization (equalize medians) per fraction - okay"))
-        }
+        processout <- rbind(processout, c("Normalization : Constant normalization (equalize medians) - okay"))
         write.table(processout, file=finalfile, row.names=FALSE)
     } ## end equaliemedian normalization    
   
@@ -625,39 +568,34 @@ dataProcess  <-  function(raw,
     
         ## for label-free, just use endogenous
   
-        nmethod <- unique(work$FRACTION)
         quantileall <- NULL
         
         ## ABUNDANCE=0 replace with 1, in order to distinguish later.
         work[!is.na(work$ABUNDANCE) & work$ABUNDANCE == 0, 'ABUNDANCE'] <- 1
   
-        for (j in 1:length(nmethod)) {
-            namerun <- unique(work[work$FRACTION == nmethod[j],"RUN"])
-    
-            worktemp <- work[which(work$RUN %in% namerun & !is.na(work$INTENSITY)),]
-            worktemp$RUN <- factor(worktemp$RUN)
-            worktemp$FEATURE <- factor(worktemp$FEATURE)
-    
-            quantiletemp <- as.matrix(xtabs(ABUNDANCE~FEATURE+RUN, data=worktemp))
-    
-            ## need to put NA for missing value in endogenous
-            quantiletemp[quantiletemp == 0] <- NA
-    
-            ## using preprocessCore library
-            quantiledone <- normalize.quantiles(quantiletemp)
-            rownames(quantiledone) <- rownames(quantiletemp)
-            colnames(quantiledone) <- colnames(quantiletemp)
-            
-            ## get quantiled to long format for apply difference endogenous
-            quantilelong <- melt(quantiledone, id=rownames(quantiledone))
-            colnames(quantilelong) <- c("FEATURE", "RUN", "ABUNDANCE_quantile")
-            rm(quantiledone)
-    
-            ## quantileall <- rbindlist(list(quantileall,quantilelong))
-            quantileall <- rbind(quantileall, quantilelong)
-    
-            rm(quantilelong)
-        }
+        worktemp <- work[which(!is.na(work$INTENSITY)),]
+        worktemp$RUN <- factor(worktemp$RUN)
+        worktemp$FEATURE <- factor(worktemp$FEATURE)
+
+        quantiletemp <- as.matrix(xtabs(ABUNDANCE~FEATURE+RUN, data=worktemp))
+
+        ## need to put NA for missing value in endogenous
+        quantiletemp[quantiletemp == 0] <- NA
+
+        ## using preprocessCore library
+        quantiledone <- normalize.quantiles(quantiletemp)
+        rownames(quantiledone) <- rownames(quantiletemp)
+        colnames(quantiledone) <- colnames(quantiletemp)
+        
+        ## get quantiled to long format for apply difference endogenous
+        quantilelong <- melt(quantiledone, id=rownames(quantiledone))
+        colnames(quantilelong) <- c("FEATURE", "RUN", "ABUNDANCE_quantile")
+        rm(quantiledone)
+
+        ## quantileall <- rbindlist(list(quantileall,quantilelong))
+        quantileall <- rbind(quantileall, quantilelong)
+
+        rm(quantilelong)
   
         work <- merge(work, quantileall, by=c("FEATURE", "RUN"))
         rm(quantileall)
@@ -675,7 +613,6 @@ dataProcess  <-  function(raw,
                            "SUBJECT_NESTED"=work$SUBJECT_NESTED, 
                            "INTENSITY"=work$INTENSITY, 
                            "ABUNDANCE"=work$ABUNDANCE_quantile, 
-                           "FRACTION"=work$FRACTION,
                            "originalRUN"=work$originalRUN)
   
         work <- work[with(work, order(GROUP_ORIGINAL, SUBJECT_ORIGINAL, RUN, PROTEIN, PEPTIDE, TRANSITION)), ]
@@ -683,12 +620,7 @@ dataProcess  <-  function(raw,
         ## for skyline case, separate 1 and zero
         work[!is.na(work$INTENSITY) & work$INTENSITY == 1, 'ABUNDANCE'] <- 0
     
-        if(length(nmethod) == 1) {
-            processout <- rbind(processout, c("Normalization : Quantile normalization - okay"))
-        } else if (length(nmethod) >1) {
-            ## if there are fractions, report addition information.
-            processout <- rbind(processout, c("Normalization : Quantile normalization per fraction - okay"))
-        }
+        processout <- rbind(processout, c("Normalization : Quantile normalization - okay"))
         write.table(processout, file=finalfile, row.names=FALSE)
     }
   
@@ -746,30 +678,15 @@ dataProcess  <-  function(raw,
         allmean <- apply(combine,1, function(x) mean(x, na.rm=TRUE))
         ## allmean[is.na(allmean)] <- 0
     
-        allmeantemp <- data.frame(RUN=names(allmean),allmean)
-        allrun <- unique(work[,c("RUN","FRACTION")])
-    
-        allmeantemp <- merge(allmeantemp, allrun,by="RUN")
-        median.all <- tapply(allmeantemp$allmean, allmeantemp$FRACTION, function(x) median(x,na.rm=TRUE))
-    
         ## adjust
-        nmethod <- unique(work$FRACTION)
-    
-        for(j in 1:length(nmethod)) {
-            namerun <- unique(work[work$FRACTION==nmethod[j], "RUN"])
-      
-            for (i in 1:length(namerun)) {
-                ## ABUNDANCE is normalized          
-                if (!is.na(allmean[names(allmean)==namerun[i]])) work[work$RUN==namerun[i],"ABUNDANCE"] <- work[work$RUN==namerun[i],"ABUNDANCE"]-allmean[names(allmean)==namerun[i]]+median.all[j]
-            }
-        } # end loop method
-    
-        if(length(nmethod) == 1) {
-            processout <- rbind(processout, c("Normalization : normalization with global standards protein - okay"))
-        } else if (length(nmethod) >1) {
-            ## if there are fractions, report addition information.
-            processout <- rbind(processout, c("Normalization : normalization with global standards protein - okay"))
+        namerun <- unique(work[, "RUN"])
+  
+        for (i in 1:length(namerun)) {
+            ## ABUNDANCE is normalized          
+            if (!is.na(allmean[names(allmean)==namerun[i]])) work[work$RUN==namerun[i],"ABUNDANCE"] <- work[work$RUN==namerun[i],"ABUNDANCE"]-allmean[names(allmean)==namerun[i]]
         }
+    
+        processout <- rbind(processout, c("Normalization : normalization with global standards protein - okay"))
         write.table(processout, file=finalfile, row.names=FALSE)
     
     }
@@ -784,165 +701,6 @@ dataProcess  <-  function(raw,
     ## hard to know how much higher, so, use intensity value, which is not used for noramlization
     work[!is.na(work$INTENSITY) & work$INTENSITY == 1, "ABUNDANCE"] <- 0
     
-    ## ----------------------------------------------------------- ##
-    ## if there are multiple method, need to merge after normalization + before feature selection ##
-    if ( length(unique(work$FRACTION)) > 1 ){
-        ## check any features measured across all runs.
-        
-        ## use the subset of data without missing values
-        ## here 'INTENSITY' is used, instead of 'ABUNDANCE'
-        tmp <- work[!is.na(work$ABUNDANCE) & work$ABUNDANCE > 0, ]
-        
-        check.multiple.run <- xtabs(~ FEATURE + FRACTION, tmp)
-        check.multiple.run.TF <- check.multiple.run != 0
-        check.multiple.run.feature <- apply(check.multiple.run.TF, 1, sum)
-    
-        ## each feature should be measured only in one method
-        overlap.feature <- names(check.multiple.run.feature[check.multiple.run.feature > 1 ])
-        
-        ## It should be zero overlap.feature.
-        ## however, this is for double-check. 
-        ## If there are overlapped feature, it means something not works well above filtering.
-      
-        if( length(overlap.feature) > 0 ){
-      
-            message(paste0("** Please check the listed featurues (", 
-                          paste(overlap.feature, collapse=", "), 
-                          ") \n Those features are measured across all fractionations."))
-              
-            processout <- rbind(processout,
-                                c( paste0("** Please check the listed featurues (", 
-                                         paste(overlap.feature, collapse=", "), 
-                                         ") Those features are measured across all fractionations.
-                                         Please keep only one intensity of listed features among fractionations from one sample.")))
-            write.table(processout, file=finalfile, row.names=FALSE)
-      
-            stop("Please keep only one intensity of listed features among fractinations from one sample. \n")
-        }
-        
-        ## ----------------------------------------------------------- ##
-        ## merge ##
-        ## get which Run id should be merged
-        ## decide which two runs should be merged
-        if( any(is.element(colnames(work), 'TECHREPLICATE')) ) {
-            
-            runid.multiple <- unique(work[, c('GROUP_ORIGINAL', 
-                                              'SUBJECT_ORIGINAL', 
-                                              'RUN', 
-                                              'originalRUN', 
-                                              'FRACTION',
-                                              'TECHREPLICATE')])
-            
-            ## if there are technical replicates from the same group and subject, can't match.
-            run.match <- try(reshape2::dcast(GROUP_ORIGINAL + SUBJECT_ORIGINAL + TECHREPLICATE ~ FRACTION, 
-                                   data=runid.multiple, value.var = 'originalRUN'), silent=TRUE)
-            
-            if (class(run.match) == "try-error") {
-                
-                processout <- rbind(processout,c( "*** error : can't figure out which multiple runs come from the same sample."))
-                write.table(processout, file=finalfile, row.names=FALSE)
-                
-                stop("*** error : can't figure out which multiple runs come from the same sample.")
-                
-            } else {
-                
-                work$newRun <- NA
-                
-                run.match$GROUP_ORIGINAL <- as.character(run.match$GROUP_ORIGINAL)
-                run.match$SUBJECT_ORIGINAL <- as.character(run.match$SUBJECT_ORIGINAL)
-                
-                for(k in 1:nrow(run.match)){
-                    work[which(work$originalRUN %in% 
-                                   run.match[k, 4:ncol(run.match)]), 'newRun'] <- paste(paste(run.match[k, 1:4], collapse = "_"), 'merged', sep="_")
-                }
-                
-                ## remove extra run NAs
-                tmp <- work[!is.na(work$ABUNDANCE) & work$ABUNDANCE > 0, ]
-                
-                na.count <- reshape2::dcast(FEATURE ~ FRACTION, data=tmp, fun.aggregate=length, value.var='ABUNDANCE')
-                na.count.long <- melt(na.count, id.vars=c('FEATURE'))
-                na.count.long <- na.count.long[na.count.long$value == length(unique(work$newRun)), ]
-                na.count.long$tmp <- paste(na.count.long$FEATURE, na.count.long$variable, sep="_")
-                
-                work$tmp <- paste(work$FEATURE, work$FRACTION, sep="_")
-                
-                work <- work[-which(work$tmp %in% na.count.long$tmp), ]
-                ##
-                
-                work$originalRUN <- work$newRun
-                
-                ## update RUN based on new originalRUN
-                work$RUN <- work$originalRUN
-                work$RUN <- factor(work$RUN, levels=unique(work$RUN), labels=seq(1, length(unique(work$RUN))))
-                
-                work <- work[, -which(colnames(work) %in% c('tmp','newRun'))]
-                
-            }
-        } else { ## Fraction, but no tech replicate
-            runid.multiple <- unique(work[, c('GROUP_ORIGINAL', 
-                                              'SUBJECT_ORIGINAL', 
-                                              'RUN', 
-                                              'originalRUN', 
-                                              'FRACTION')])
-            
-            ## if there are technical replicates from the same group and subject, can't match.
-            run.match <- try(reshape2::dcast(GROUP_ORIGINAL + SUBJECT_ORIGINAL ~ FRACTION, 
-                                             data=runid.multiple, value.var = 'originalRUN'), silent=TRUE)
-            
-            if (class(run.match) == "try-error") {
-                
-                processout <- rbind(processout,
-                                    c( "*** error : can't figure out which multiple runs come from the same sample."))
-                write.table(processout, file=finalfile, row.names=FALSE)
-                
-                stop("*** error : can't figure out which multiple runs come from the same sample.")
-                
-            } else {
-                
-                work$newRun <- NA
-                
-                run.match$GROUP_ORIGINAL <- as.character(run.match$GROUP_ORIGINAL)
-                run.match$SUBJECT_ORIGINAL <- as.character(run.match$SUBJECT_ORIGINAL)
-                
-                for(k in 1:nrow(run.match)){
-                    work[which(work$originalRUN %in% 
-                                   run.match[k, 3:ncol(run.match)]), 'newRun'] <- paste(paste(run.match[k, 1:3], 
-                                                                                              collapse = "_"), 'merged', sep="_")
-                }
-                
-                ## remove extra run NAs or less than zero 
-                ## because the goal is to find the one fraction should be used for each feature.
-                tmp <- work[!is.na(work$ABUNDANCE) & work$ABUNDANCE > 0, ]
-                
-                ## find which fraction should be used for each feature
-                select.fraction <- tmp %>% group_by(FEATURE, FRACTION) %>% summarise(ncount = n())
-                ## check : test <- select.fraction %>% group_by(FEATURE) %>% summarise(nfeature = n())
-                ## it can be less than # of runs, if there are any missing
-                ## just in case that there are zero runs, let's check and remove.
-                select.fraction <- select.fraction %>% filter(ncount != 0)
-                select.fraction$tmp <- paste(select.fraction$FEATURE, select.fraction$FRACTION, sep="_")
-                
-                ## then keep one fraction for each feature
-                work$tmp <- paste(work$FEATURE, work$FRACTION, sep="_")
-                
-                work <- work[which(work$tmp %in% select.fraction$tmp), ]
-                
-                ## new run has merged run id
-                ## original run id can be different by fraction
-                ## now fraction information from run will be removed.
-                work$originalRUN <- work$newRun
-                
-                ## update RUN based on new originalRUN
-                work$RUN <- work$originalRUN
-                work$RUN <- factor(work$RUN, levels=unique(work$RUN), labels=seq(1, length(unique(work$RUN))))
-                
-                work <- work[, -which(colnames(work) %in% c('tmp','newRun'))]
-                
-            }
-        }
-    
-    }
-  
     #Below two lines were merely for in-house testing and comparisons when needed
     #work.NoImpute <- work
     #AbundanceAfterImpute <- .Imputation(work, cutoffCensored, censoredInt, remove50missing, MBimpute, original_scale)
@@ -1194,7 +952,7 @@ dataProcess  <-  function(raw,
     summary.s[2,] <- temp1
   
     ## # of technical replicates
-    c.tech <- round(summary.s[1,] / (summary.s[2,] * length(unique(work$FRACTION))))
+    c.tech <- round(summary.s[1,] / summary.s[2,])
     ##summary.s[3,] <- ifelse(c.tech==1,0,c.tech)
     summary.s[3,] <- c.tech
   
@@ -1388,14 +1146,13 @@ resultsAsLists <- function(x, ...) {
     
             singleFeature <- .checkSingleFeature(sub)
             singleSubject <- .checkSingleSubject(sub)
-            TechReplicate <- .checkTechReplicate(sub) ## use for label-free model
         
             ##### fit the model
             #if (message.show) {
                 message(paste("Getting the summarization per subplot for protein ",unique(sub$PROTEIN), "(",i," of ",length(unique(data$PROTEIN)),")"))
             #}
             
-            fit <- try(.fit.quantification.run(sub, singleFeature, singleSubject, TechReplicate, equalFeatureVar), silent=TRUE)
+            fit <- try(.fit.quantification.run(sub, singleFeature, singleSubject, equalFeatureVar), silent=TRUE)
              
             if (class(fit)=="try-error") {
                 message("*** error : can't fit the model for ", levels(data$PROTEIN)[i])
@@ -2723,7 +2480,7 @@ resultsAsLists <- function(x, ...) {
 
 ##########################################################################################
 ## updated v3
-.fit.quantification.run <- function(sub, singleFeature, singleSubject, TechReplicate, equalFeatureVar) {
+.fit.quantification.run <- function(sub, singleFeature, singleSubject, equalFeatureVar) {
     
     ## for single Feature, original value is the run quantification
     if (singleFeature) {
