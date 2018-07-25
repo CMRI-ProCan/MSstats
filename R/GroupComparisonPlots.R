@@ -79,7 +79,7 @@ groupComparisonPlots <- function(data=data,
                             "ERROR : (-) Logarithm transformation for adjusted p-values : log2 or log10 only - stop")
         write.table(processout, file=finalfile, row.names=FALSE)
         
-        stop("Only -log2 or -log10 for logarithm transformation for adjusted p-values are posssible.\n")
+        stop("Only -log2 or -log10 for logarithm transformation for adjusted p-values are possible.\n")
     }
   
     if (which.Comparison != "all") {

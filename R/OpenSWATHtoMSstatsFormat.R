@@ -50,7 +50,7 @@ OpenSWATHtoMSstatsFormat <- function(input,
     
     if (!all(requiredinput.general %in% colnames(input))) {
         
-        misssing.col <- requiredinput.general[!requiredinput.general %in% colnames(input)]
+        missing.col <- requiredinput.general[!requiredinput.general %in% colnames(input)]
         
         stop(paste0("** Please check the required input. The required input needs : ", 
                    toString(missing.col)))

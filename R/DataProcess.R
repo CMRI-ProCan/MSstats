@@ -99,7 +99,7 @@ dataProcess  <-  function(raw,
 	    processout <- rbind(processout,c("ERROR : Logarithm transformation : log2 or log10 only - stop"))
 	    write.table(processout, file=finalfile,row.names=FALSE)
 	  
-	    stop("Only log2 or log10 are posssible.\n")
+	    stop("Only log2 or log10 are possible.\n")
 	}
 	
 	## check no row for some feature : balanced structure or not  
