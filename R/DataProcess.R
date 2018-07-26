@@ -1238,6 +1238,7 @@ resultsAsLists <- function(x, ...) {
                       
                     sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
                     sub$cen <- ifelse(sub$censored, 0, 1)
+                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
                       
                 }
                   
@@ -1246,8 +1247,11 @@ resultsAsLists <- function(x, ...) {
                       
                     sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
                     sub$cen <- ifelse(sub$censored, 0, 1)
+                    subtemp <- sub[!is.na(sub$ABUNDANCE), ]
                       
                 }
+            } else {
+                subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
             }
               
             ## if all measurements are NA,
@@ -1258,26 +1262,8 @@ resultsAsLists <- function(x, ...) {
                 next()
             }
               
-            ## remove features which are completely NAs
-            if ( MBimpute ) {
-                ## 1. censored 
-                if (censoredInt == "0") {
-                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                      
-                }
-                  
-                ## 2. all censored missing
-                if (censoredInt == "NA") {
-                      
-                    subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                      
-                }  
-            } else {
-                subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-            }
-              
             countfeature <- xtabs(~FEATURE, subtemp)
-            namefeature <- names(countfeature)[countfeature == 0]
+            namefeature <- names(countfeature)[countfeature <= 1]
               
             if (length(namefeature) != 0) {
                 sub <- sub[-which(sub$FEATURE %in% namefeature), ]
@@ -1285,31 +1271,14 @@ resultsAsLists <- function(x, ...) {
                 if (nrow(sub) == 0) {
                     message(paste("Can't summarize for ", unique(sub$PROTEIN), 
                             "(", i, " of ", length(unique(data$PROTEIN)), 
-                            ") because all measurements are NAs."))
+                            ") because features have one or fewer measurements across MS runs."))
                     next()
                       
                 } else {
                     sub$FEATURE <- factor(sub$FEATURE)
                 }
             }
-              
-            ## remove features which have only 1 measurement.
-            namefeature1 <- names(countfeature)[countfeature == 1]
-              
-            if (length(namefeature1) != 0) {
-                sub <- sub[-which(sub$FEATURE %in% namefeature1), ]
-                  
-                if (nrow(sub) == 0) {
-                    message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                            "(", i, " of ", length(unique(data$PROTEIN)), 
-                            ") because features have only one measurement across MS runs."))
-                    next()
-
-                } else {
-                    sub$FEATURE <- factor(sub$FEATURE)
-                }
-            }
-              
+             
             ## check one more time
             ## if all measurements are NA,
             if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
