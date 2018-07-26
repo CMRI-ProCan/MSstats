@@ -1301,15 +1301,10 @@ resultsAsLists <- function(x, ...) {
             } else {
                 subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
             }
-              
+            #Remove runs with all missing / zero values
             count <- aggregate(ABUNDANCE ~ RUN, data=subtemp, length)
-            norun <- setdiff(unique(data$RUN), count$RUN)
-              
-            if (length(norun) != 0 & length(intersect(norun, as.character(unique(sub$RUN))))) { 
-                # removed NA rows already, if there is no overlapped run, error
-                sub <- sub[-which(sub$RUN %in% norun), ]
-                sub$RUN <- factor(sub$RUN)
-            }
+            sub <- sub[sub$RUN %in% count$RUN, ]
+            sub$RUN <- factor(sub$RUN)
               
             if (remove50missing) {
                 # count # feature per run
@@ -1503,14 +1498,14 @@ resultsAsLists <- function(x, ...) {
                         set.seed(100)
                         ### fit the model
                         if (length(unique(sub$FEATURE)) == 1) {
-                            fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
+                            fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ RUN, 
                                                            data=sub, dist='gaussian')
                         } else {
                             if (countdf) {
-                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN, 
+                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ RUN, 
                                                              data=sub, dist='gaussian')
                             } else {
-                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ FEATURE+RUN, 
+                                fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ FEATURE+RUN, 
                                                                data=sub, dist='gaussian')
                             }
                         }
@@ -1862,14 +1857,14 @@ resultsAsLists <- function(x, ...) {
             
             ### fit the model
             if (length(unique(sub$FEATURE)) == 1) {
-                fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN,
+                fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ RUN,
                                              data=sub, dist='gaussian')
             } else {
                 if (countdf) {
-                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ RUN,
+                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ RUN,
                                                  data=sub, dist='gaussian')
                 } else {
-                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, cen, type='left') ~ FEATURE+RUN,
+                    fittest <- survival::survreg(survival::Surv(ABUNDANCE, !censored, type='left') ~ FEATURE+RUN,
                                                  data=sub, dist='gaussian')
                 }
             }
