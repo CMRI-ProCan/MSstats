@@ -1013,10 +1013,10 @@ dataProcess  <-  function(raw,
     
     message("\n == Start the summarization per subplot...")
 
-    rqresult <- try(.runQuantification(work, summaryMethod, equalFeatureVar, 
+    rqresult <- .runQuantification(work, summaryMethod, equalFeatureVar, 
                                        cutoffCensored, censoredInt, remove50missing, MBimpute, 
                                        original_scale=FALSE, logsum=FALSE, featureSubset,
-                                       message.show=FALSE), silent=TRUE)
+                                       message.show=FALSE)
 
     if (class(rqresult) == "try-error") {
         message("*** error : can't summarize per subplot with ", summaryMethod, ".")
@@ -1216,7 +1216,7 @@ resultsAsLists <- function(x, ...) {
         data$PROTEIN <- factor(data$PROTEIN)
         data$RUN <- factor(data$RUN)
     
-        result <- NULL
+        result <- list()
       
 	pb <- progress_bar$new(format = "Progress [:bar] :percent eta :eta", total = nlevels(data$PROTEIN))
         
@@ -1252,14 +1252,6 @@ resultsAsLists <- function(x, ...) {
                 subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
             }
               
-            ## if all measurements are NA,
-            if ( nrow(sub) == (sum(is.na(sub$ABUNDANCE)) + sum(!is.na(sub$ABUNDANCE) & sub$ABUNDANCE == 0)) ) {
-                message(paste("Can't summarize for ", unique(sub$PROTEIN), 
-                              "(", i, " of ", length(unique(data$PROTEIN)),
-                              ") because all measurements are NAs."))
-                next()
-            }
-              
             countfeature <- xtabs(~FEATURE, subtemp)
             namefeature <- names(countfeature)[countfeature <= 1]
               
@@ -1286,8 +1278,6 @@ resultsAsLists <- function(x, ...) {
                 next()
             }
               
-            ## remove run which has no measurement at all 
-            ## remove features which are completely NAs
             if ( MBimpute ) {
                 ## 1. censored 
                 if (censoredInt == "0") {
@@ -1490,7 +1480,7 @@ resultsAsLists <- function(x, ...) {
                   
                 if (MBimpute) {
                       
-                    if (nrow(sub[sub$censored, ]) > 0) {
+                    if (sum(sub$censored) > 0) {
                         ## impute by survival model
                         subtemp <- sub[!is.na(sub$ABUNDANCE),]
                         countdf <- nrow(subtemp) < (length(unique(subtemp$FEATURE))+length(unique(subtemp$RUN))-1)
@@ -1510,11 +1500,8 @@ resultsAsLists <- function(x, ...) {
                             }
                         }
                           
-                        # get predicted value from survival
-                        sub <- data.frame(sub, pred=predict(fittest, newdata=sub, type="response"))
-                          
                         # the replace censored value with predicted value
-                        sub[sub$censored, "ABUNDANCE"] <- sub[sub$censored, "pred"] 
+                        sub[sub$censored, "ABUNDANCE"] <- predict(fittest, newdata=sub[sub$censored, ], type="response")
                           
                         # save predicted value
                           # predAbundance <- c(predAbundance,predict(fittest, newdata=sub, type="response"))
@@ -1602,7 +1589,7 @@ resultsAsLists <- function(x, ...) {
                       
                 }
                   
-                result <- rbind(result, sub.result)
+                result[[i]] <- sub.result
             } else { ## single feature
                   
                 ## single feature, use original values
@@ -1652,7 +1639,7 @@ resultsAsLists <- function(x, ...) {
                       
                 }
                   
-                result <- rbind(result, sub.result)
+                result[[i]] <- sub.result
             }
             
             ## progress
@@ -1662,6 +1649,7 @@ resultsAsLists <- function(x, ...) {
         pb$terminate()
         
         dataafterfit <- NULL
+	result <- do.call(rbind, result)
     }
         
     ###################################
