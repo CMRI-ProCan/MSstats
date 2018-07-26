@@ -1233,22 +1233,20 @@ resultsAsLists <- function(x, ...) {
               
             ### how to decide censored or not
             if ( MBimpute ) {
-                if (!is.null(censoredInt)) {
-                    ## 1. censored 
-                    if (censoredInt == "0") {
-                          
-                        sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
-                        sub$cen <- ifelse(sub$censored, 0, 1)
-                          
-                    }
+                ## 1. censored 
+                if (censoredInt == "0") {
                       
-                    ## 2. all censored missing
-                    if (censoredInt == "NA") {
-                          
-                        sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
-                        sub$cen <- ifelse(sub$censored, 0, 1)
-                          
-                    }
+                    sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
+                    sub$cen <- ifelse(sub$censored, 0, 1)
+                      
+                }
+                  
+                ## 2. all censored missing
+                if (censoredInt == "NA") {
+                      
+                    sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
+                    sub$cen <- ifelse(sub$censored, 0, 1)
+                      
                 }
             }
               
@@ -1262,21 +1260,18 @@ resultsAsLists <- function(x, ...) {
               
             ## remove features which are completely NAs
             if ( MBimpute ) {
-                if (!is.null(censoredInt)) {
-                    ## 1. censored 
-                    if (censoredInt == "0") {
-                        subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                          
-                    }
+                ## 1. censored 
+                if (censoredInt == "0") {
+                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
                       
-                    ## 2. all censored missing
-                    if (censoredInt == "NA") {
-                          
-                        subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                          
-                    }  
+                }
+                  
+                ## 2. all censored missing
+                if (censoredInt == "NA") {
                       
-                } 
+                    subtemp <- sub[!is.na(sub$ABUNDANCE), ]
+                      
+                }  
             } else {
                 subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
             }
@@ -1327,17 +1322,15 @@ resultsAsLists <- function(x, ...) {
             ## remove run which has no measurement at all 
             ## remove features which are completely NAs
             if ( MBimpute ) {
-                if (!is.null(censoredInt)) {
-                    ## 1. censored 
-                    if (censoredInt == "0") {
-                        subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
-                    }
-                      
-                    ## 2. all censored missing
-                    if (censoredInt == "NA") {
-                        subtemp <- sub[!is.na(sub$ABUNDANCE), ]
-                    }  
-                } 
+                ## 1. censored 
+                if (censoredInt == "0") {
+                    subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
+                }
+                  
+                ## 2. all censored missing
+                if (censoredInt == "NA") {
+                    subtemp <- sub[!is.na(sub$ABUNDANCE), ]
+                }  
             } else {
                 subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
             }
