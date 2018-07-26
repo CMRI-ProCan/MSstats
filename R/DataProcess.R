@@ -1237,7 +1237,6 @@ resultsAsLists <- function(x, ...) {
                 if (censoredInt == "0") {
                       
                     sub[sub$censored == TRUE, 'ABUNDANCE'] <- 0
-                    sub$cen <- ifelse(sub$censored, 0, 1)
                     subtemp <- sub[!is.na(sub$ABUNDANCE) & sub$ABUNDANCE != 0, ]
                       
                 }
@@ -1246,7 +1245,6 @@ resultsAsLists <- function(x, ...) {
                 if (censoredInt == "NA") {
                       
                     sub[sub$censored == TRUE, 'ABUNDANCE'] <- NA
-                    sub$cen <- ifelse(sub$censored, 0, 1)
                     subtemp <- sub[!is.na(sub$ABUNDANCE), ]
                       
                 }
@@ -1341,7 +1339,7 @@ resultsAsLists <- function(x, ...) {
             }
               
             ## check whether we need to impute or not.
-            if (sum(sub$cen == 0) > 0) {
+            if (sum(sub$censored) > 0) {
                   
                 ## 2. put minimum in feature level to NA
                 if (cutoffCensored == "minFeature") {
@@ -1497,7 +1495,7 @@ resultsAsLists <- function(x, ...) {
                   
                 if (MBimpute) {
                       
-                    if (nrow(sub[sub$cen == 0, ]) > 0) {
+                    if (nrow(sub[sub$censored, ]) > 0) {
                         ## impute by survival model
                         subtemp <- sub[!is.na(sub$ABUNDANCE),]
                         countdf <- nrow(subtemp) < (length(unique(subtemp$FEATURE))+length(unique(subtemp$RUN))-1)
@@ -1521,7 +1519,7 @@ resultsAsLists <- function(x, ...) {
                         sub <- data.frame(sub, pred=predict(fittest, newdata=sub, type="response"))
                           
                         # the replace censored value with predicted value
-                        sub[sub$cen == 0, "ABUNDANCE"] <- sub[sub$cen == 0, "pred"] 
+                        sub[sub$censored, "ABUNDANCE"] <- sub[sub$censored, "pred"] 
                           
                         # save predicted value
                           # predAbundance <- c(predAbundance,predict(fittest, newdata=sub, type="response"))
