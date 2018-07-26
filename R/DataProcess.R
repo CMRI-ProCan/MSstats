@@ -10,12 +10,11 @@
 #' @importFrom stats medpolish aggregate t.test lm summary.lm fitted resid p.adjust
 #' @importFrom stats C approx coef cor dist formula loess median na.omit
 #' @importFrom stats predict pt qnorm qt quantile reshape rnorm runif sd var vcov xtabs
-#' @importFrom utils head read.table sessionInfo setTxtProgressBar txtProgressBar write.csv write.table
+#' @importFrom utils head read.table sessionInfo write.csv write.table
 #' @importFrom methods validObject
-#' @importFrom doSNOW registerDoSNOW
-#' @importFrom snow makeCluster
 #' @importFrom foreach foreach %dopar%
 #' @importFrom dplyr filter n
+#' @importFrom progress progress_bar
 #' @importFrom tidyr gather
 
 dataProcess  <-  function(raw,
@@ -1219,7 +1218,7 @@ resultsAsLists <- function(x, ...) {
     
         result <- NULL
       
-        pb <- txtProgressBar(max = nlevels(data$PROTEIN), style = 3)
+	pb <- progress_bar$new(format = "Progress [:bar] :percent eta :eta", total = nlevels(data$PROTEIN))
         
         for(i in 1: nlevels(data$PROTEIN)) {
             
@@ -1702,10 +1701,10 @@ resultsAsLists <- function(x, ...) {
             }
             
             ## progress
-            setTxtProgressBar(pb, i)
+            pb$tick()
             
         }  ## loop for proteins
-        close(pb)
+        pb$terminate()
         
         dataafterfit <- NULL
     }
